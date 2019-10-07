@@ -1,4 +1,5 @@
 import os, sys
+sys.path.insert(1, os.getcwd() + "/comoon")
 from copy import copy
 from functools import reduce
 
@@ -6,14 +7,15 @@ import numpy as np
 import tensorflow as tf
 import tensorflow.contrib as tc
 
+import baselines.common.tf_util as U
 from baselines.common.tf_util import get_session, save_variables, load_variables
 from normalizers import EMAMeanStd
 from baselines import logger
 from baselines.common.mpi_adam import MpiAdam
 from baselines.common.distributions import make_pdtype
 from variable_schema import VariableSchema, BATCH, TIMESTEPS
-import baselines.common.tf_util as U
 from baselines.common.mpi_running_mean_std import RunningMeanStd
+from util_algo import obs_reduce_dim, batch_obs_to_dictObs, batch_act_to_dictAct
 try:
     from mpi4py import MPI
 except ImportError:
@@ -123,6 +125,8 @@ class DDPG(object):
         self.critic_l2_reg = critic_l2_reg
         self._ema_beta = ema_beta
         self._running_mean_stds = {}
+
+        self.obs_rms = network.obs_rms
     
         # Return normalization.
         if self.normalize_returns:
@@ -132,7 +136,7 @@ class DDPG(object):
             self.ret_rms = None
 
         # Create networks and core TF parts that are shared across setup parts.
-        self.actor_tf = network.act
+        self.actor_tf = network.sampled_action
         self.normalized_critic_tf = network.value
         self.critic_tf = denormalize(tf.clip_by_value(self.normalized_critic_tf, self.return_range[0], self.return_range[1]), self.ret_rms)
         self.normalized_critic_with_actor_tf = network.value
@@ -142,7 +146,7 @@ class DDPG(object):
 
         # Set up parts.
         if self.param_noise is not None:
-            self.setup_param_noise(normalized_obs0)
+            self.setup_param_noise(self.obs0)
         self.setup_actor_optimizer()
         self.setup_critic_optimizer()
         if self.normalize_returns and self.enable_popart:
@@ -158,18 +162,18 @@ class DDPG(object):
         self.target_init_updates = [actor_init_updates, critic_init_updates]
         self.target_soft_updates = [actor_soft_updates, critic_soft_updates]
 
-    def setup_param_noise(self, normalized_obs0):
+    def setup_param_noise(self, obs0):
         assert self.param_noise is not None
 
         # Configure perturbed actor.
         param_noise_actor = copy(self.network)
-        self.perturbed_actor_tf = param_noise_actor.act(normalized_obs0)
+        self.perturbed_actor_tf = param_noise_actor.sampled_action
         logger.info('setting up param noise')
         self.perturb_policy_ops = get_perturbed_actor_updates(self.network, param_noise_actor, self.param_noise_stddev)
 
         # Configure separate copy for stddev adoption.
         adaptive_param_noise_actor = copy(self.network)
-        adaptive_actor_tf = adaptive_param_noise_actor.act(normalized_obs0)
+        adaptive_actor_tf = adaptive_param_noise_actor.sampled_action
         self.perturb_adaptive_policy_ops = get_perturbed_actor_updates(self.network, adaptive_param_noise_actor, self.param_noise_stddev)
         self.adaptive_policy_distance = tf.sqrt(tf.reduce_mean(tf.square(self.actor_tf - adaptive_actor_tf)))
 
@@ -189,7 +193,7 @@ class DDPG(object):
         normalized_critic_target_tf = tf.clip_by_value(normalize(self.critic_target, self.ret_rms), self.return_range[0], self.return_range[1])
         self.critic_loss = tf.reduce_mean(tf.square(self.normalized_critic_tf - normalized_critic_target_tf))
         if self.critic_l2_reg > 0.:
-            critic_reg_vars = [var for var in self.network.critic_variables if var.name.endswith('/w:0') and 'output' not in var.name]
+            critic_reg_vars = [var for var in self.network.critic_variables if var.name.endswith('/kernel:0') and 'output' not in var.name]
             for var in critic_reg_vars:
                 logger.info('  regularizing: {}'.format(var.name))
             logger.info('  applying l2 regularization with {}'.format(self.critic_l2_reg))
@@ -231,7 +235,7 @@ class DDPG(object):
         if self.normalize_returns:
             ops += [self.ret_rms.mean, self.ret_rms.std]
             names += ['ret_rms_mean', 'ret_rms_std']
-
+        
         if self.normalize_observations:
             ops += [tf.reduce_mean(self.obs_rms.mean), tf.reduce_mean(self.obs_rms.std)]
             names += ['obs_rms_mean', 'obs_rms_std']
@@ -246,17 +250,6 @@ class DDPG(object):
         ops += [reduce_std(self.critic_with_actor_tf)]
         names += ['reference_actor_Q_std']
 
-        ops += [tf.reduce_mean(self.actor_tf)]
-        names += ['reference_action_mean']
-        ops += [reduce_std(self.actor_tf)]
-        names += ['reference_action_std']
-
-        if self.param_noise:
-            ops += [tf.reduce_mean(self.perturbed_actor_tf)]
-            names += ['reference_perturbed_action_mean']
-            ops += [reduce_std(self.perturbed_actor_tf)]
-            names += ['reference_perturbed_action_std']
-
         self.stats_ops = ops
         self.stats_names = names
 
@@ -265,28 +258,30 @@ class DDPG(object):
             actor_tf = self.perturbed_actor_tf
         else:
             actor_tf = self.actor_tf
-        feed_dict = {self.obs0: U.adjust_shape(self.obs0, [obs])}
         if compute_Q:
-            action, q = self.sess.run([actor_tf, self.critic_with_actor_tf], feed_dict=feed_dict)
+            action = self.network.act(obs_reduce_dim(obs, 0))
+            q = self.network.qvalue(self.critic_with_actor_tf, obs_reduce_dim(obs, 0), action)
         else:
-            action = self.sess.run(actor_tf, feed_dict=feed_dict)
+            action = self.network.act(obs_reduce_dim(obs, 0))
             q = None
 
         if self.action_noise is not None and apply_noise:
             noise = self.action_noise()
             assert noise.shape == action[0].shape
             action += noise
-        action = np.clip(action, self.action_range[0], self.action_range[1])
-
-
+        
+        for k, v in action.items():
+            action[k] = np.clip(v, self.action_range[0], self.action_range[1])
+        
         return action, q, None, None
 
     def store_transition(self, obs0, action, reward, obs1, terminal1):
         reward *= self.reward_scale
 
-        B = obs0.shape[0]
+        B = obs0['observation_self'].shape[0]
         for b in range(B):
-            self.memory.append(obs0[b], action[b], reward[b], obs1[b], terminal1[b])
+            #self.memory.append(obs0[b], action[b], reward[b], obs1[b], terminal1[b])
+            self.memory.append(obs0, action, reward, obs1, terminal1)
             if self.normalize_observations:
                 self.obs_rms.update(np.array([obs0[b]]))
 
@@ -305,30 +300,23 @@ class DDPG(object):
                 self.old_std : np.array([old_std]),
                 self.old_mean : np.array([old_mean]),
             })
-
-            # Run sanity check. Disabled by default since it slows down things considerably.
-            # print('running sanity check')
-            # target_Q_new, new_mean, new_std = self.sess.run([self.target_Q, self.ret_rms.mean, self.ret_rms.std], feed_dict={
-            #     self.obs1: batch['obs1'],
-            #     self.rewards: batch['rewards'],
-            #     self.terminals1: batch['terminals1'].astype('float32'),
-            # })
-            # print(target_Q_new, target_Q, new_mean, new_std)
-            # assert (np.abs(target_Q - target_Q_new) < 1e-3).all()
         else:
-            target_Q = self.sess.run(self.target_Q, feed_dict={
-                self.obs1: batch['obs1'],
+            target_action = self.target_network.act(batch_obs_to_dictObs(batch['obs1']))
+            extra_feed_dict = {
                 self.rewards: batch['rewards'],
-                self.terminals1: batch['terminals1'].astype('float32'),
-            })
-
+                self.terminals1: batch['terminals1'].astype('float32')
+            }
+            target_Q = self.target_network.qvalue(self.target_Q, batch_obs_to_dictObs(batch['obs1']), target_action, extra_feed_dict)
+            target_Q = np.expand_dims(target_Q, -1)
+        
         # Get all gradients and perform a synced update.
         ops = [self.actor_grads, self.actor_loss, self.critic_grads, self.critic_loss]
-        actor_grads, actor_loss, critic_grads, critic_loss = self.sess.run(ops, feed_dict={
-            self.obs0: batch['obs0'],
-            self.actions: batch['actions'],
-            self.critic_target: target_Q,
-        })
+        extra_feed_dict = {
+            self.critic_target: target_Q
+        }
+        actor_grads, actor_loss, critic_grads, critic_loss = self.network.tensor_eval(ops, batch_obs_to_dictObs(batch['obs0']),
+                                                                                      batch_act_to_dictAct(batch['actions']), extra_feed_dict)
+
         self.actor_optimizer.update(actor_grads, stepsize=self.actor_lr)
         self.critic_optimizer.update(critic_grads, stepsize=self.critic_lr)
 
@@ -399,36 +387,3 @@ class DDPG(object):
                 self.param_noise_stddev: self.param_noise.current_stddev,
             })
     
-    def _normalize_obs(self, processed_inp, scope):
-        with tf.variable_scope('normalize_self_obs'):
-            ob_rms_self = EMAMeanStd(shape=self.ob_space.spaces['observation_self'].shape,
-                                     scope=scope, beta=self._ema_beta, per_element_update=False)
-            self.add_running_mean_std("observation_self", ob_rms_self, axes=(0, 1))
-            normalized = (processed_inp['observation_self'] - ob_rms_self.mean) / ob_rms_self.std
-            clipped = tf.clip_by_value(normalized, self.observation_range[0], self.observation_range[1])
-            processed_inp['observation_self'] = clipped
-
-        for key in self.ob_space.spaces.keys():
-            if key == 'observation_self':
-                continue
-            elif 'mask' in key:  # Don't normalize observation masks
-                pass
-            else:
-                with tf.variable_scope(f'normalize_{key}'):
-                    ob_rms = EMAMeanStd(shape=self.ob_space.spaces[key].shape[1:],
-                                        scope=f"obsfilter/{key}", beta=self._ema_beta, per_element_update=False)
-                    normalized = (processed_inp[key] - ob_rms.mean) / ob_rms.std
-                    processed_inp[key] = tf.clip_by_value(normalized, self.observation_range[0], self.observation_range[1])
-                    self.add_running_mean_std(key, ob_rms, axes=(0, 1, 2))
-
-    def add_running_mean_std(self, name, rms, axes=(0, 1)):
-        """
-        Add a RunningMeanStd/EMAMeanStd object to the policy's list. It will then get updated during optimization.
-        :param name: name of the input field to update from.
-        :param rms: RMS object to update.
-        :param axes: axes of the input to average over.
-            RMS's shape should be equal to input's shape after axes are removed.
-            e.g. if inputs is [5, 6, 7, 8] and axes is [0, 2], then RMS's shape should be [6, 8].
-        :return:
-        """
-        self._running_mean_stds[name] = {'rms': rms, 'axes': axes}

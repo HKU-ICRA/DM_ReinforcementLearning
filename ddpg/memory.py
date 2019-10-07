@@ -2,11 +2,11 @@ import numpy as np
 
 
 class RingBuffer(object):
-    def __init__(self, maxlen, shape, dtype='float32'):
+    def __init__(self, maxlen, dtype='float32'):
         self.maxlen = maxlen
         self.start = 0
         self.length = 0
-        self.data = np.zeros((maxlen,) + shape).astype(dtype)
+        self.data = [None] * maxlen
 
     def __len__(self):
         return self.length
@@ -17,7 +17,7 @@ class RingBuffer(object):
         return self.data[(self.start + idx) % self.maxlen]
 
     def get_batch(self, idxs):
-        return self.data[(self.start + idxs) % self.maxlen]
+        return np.asarray(self.data)[(self.start + idxs) % self.maxlen]
 
     def append(self, v):
         if self.length < self.maxlen:
@@ -40,14 +40,14 @@ def array_min2d(x):
 
 
 class Memory(object):
-    def __init__(self, limit, action_shape, observation_shape):
+    def __init__(self, limit):
         self.limit = limit
 
-        self.observations0 = RingBuffer(limit, shape=observation_shape)
-        self.actions = RingBuffer(limit, shape=action_shape)
-        self.rewards = RingBuffer(limit, shape=(1,))
-        self.terminals1 = RingBuffer(limit, shape=(1,))
-        self.observations1 = RingBuffer(limit, shape=observation_shape)
+        self.observations0 = RingBuffer(limit)
+        self.actions = RingBuffer(limit)
+        self.rewards = RingBuffer(limit)
+        self.terminals1 = RingBuffer(limit)
+        self.observations1 = RingBuffer(limit)
 
     def sample(self, batch_size):
         # Draw such that we always have a proceeding element.

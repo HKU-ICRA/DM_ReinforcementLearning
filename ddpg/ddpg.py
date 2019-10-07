@@ -39,6 +39,7 @@ def learn(env,
           nb_eval_steps=100,
           batch_size=64, # per MPI worker
           tau=0.01,
+          action_range=(-250.0, 250.0),
           eval_env=None,
           param_noise_adaption_interval=50,
           **network_kwargs):
@@ -56,10 +57,7 @@ def learn(env,
     else:
         rank = 0
     
-    #nb_actions = env.action_space.shape[-1]
-
-    memory = Memory(limit=int(1e6), action_shape=env.action_space.spaces['action_movement'].spaces[0].shape[0],
-                                    observation_shape=env.observation_space.spaces['observation_self'].shape)
+    memory = Memory(limit=int(1e6))
 
     network_spec = [
             {
@@ -126,7 +124,7 @@ def learn(env,
             else:
                 raise RuntimeError('unknown noise type "{}"'.format(current_noise_type))
 
-    max_action = 250.0
+    max_action = action_range[1]
     logger.info('scaling actions by {} before executing in env'.format(max_action))
 
     agent = DDPG(network, memory, env.observation_space, env.action_space,
@@ -149,16 +147,15 @@ def learn(env,
     obs = env.reset()
     if eval_env is not None:
         eval_obs = eval_env.reset()
-    nenvs = obs.shape[0]
+    nenvs = env.num_envs
+    n_agents = obs['observation_self'].shape[0]
 
-    episode_reward = np.zeros(nenvs, dtype = np.float32) #vector
+    episode_reward = np.zeros((nenvs, n_agents), dtype = np.float32) #vector
     episode_step = np.zeros(nenvs, dtype = int) # vector
     episodes = 0 #scalar
     t = 0 # scalar
 
     epoch = 0
-
-
 
     start_time = time.time()
 
@@ -183,7 +180,14 @@ def learn(env,
                     env.render()
 
                 # max_action is of dimension A, whereas action is dimension (nenvs, A) - the multiplication gets broadcasted to the batch
-                new_obs, r, done, info = env.step(max_action * action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
+                for k, v in action.items():
+                    action[k] *= max_action
+                
+                nenvs_actions = []
+                for i in range(nenvs):
+                    nenv_action = {'action_movement' : action['action_movement'][i*n_agents:(i + 1)*n_agents]}
+                    nenvs_actions.append(nenv_action)
+                new_obs, r, done, info = env.step(nenvs_actions)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
                 # note these outputs are batched from vecenv
 
                 t += 1

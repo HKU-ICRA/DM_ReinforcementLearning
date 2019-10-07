@@ -113,13 +113,15 @@ class MAPolicy(object):
 
         if self.normalize_observations:
             self._normalize_inputs(processed_inp)
+        else:
+            self.obs_rms = None
 
         self.state_out = OrderedDict()
 
         # Value network
         (vpred,
          vpred_state_out,
-         vpred_reset_ops) = construct_tf_graph(processed_inp, self.v_network_spec, scope='vpred_net')
+         vpred_reset_ops) = self.construct_vpred_net()
 
         self._init_vpred_head(vpred, processed_inp, 'vpred_out0', "value0")
 
@@ -209,10 +211,13 @@ class MAPolicy(object):
             else:
                 self.scaled_value_tensor = _vpred
 
+    def construct_vpred_net(self):
+        return construct_tf_graph(processed_inp, self.v_network_spec, scope='vpred_net')
+
     def _normalize_inputs(self, processed_inp):
         with tf.variable_scope('normalize_self_obs'):
-            ob_rms_self = EMAMeanStd(shape=self.ob_space.spaces['observation_self'].shape,
-                                     scope="obsfilter", beta=self._ema_beta, per_element_update=False)
+            self.obs_rms = ob_rms_self = EMAMeanStd(shape=self.ob_space.spaces['observation_self'].shape,
+                                        scope="obsfilter", beta=self._ema_beta, per_element_update=False)
             self.add_running_mean_std("observation_self", ob_rms_self, axes=(0, 1))
             normalized = (processed_inp['observation_self'] - ob_rms_self.mean) / ob_rms_self.std
             clipped = tf.clip_by_value(normalized, self.observation_range[0], self.observation_range[1])

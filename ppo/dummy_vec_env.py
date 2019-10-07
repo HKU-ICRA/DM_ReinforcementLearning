@@ -1,7 +1,10 @@
+import os, sys
+sys.path.insert(1, os.getcwd() + "/common")
 import numpy as np
+
 from baselines.common.vec_env import VecEnv
 from baselines.common.vec_env.util import copy_obs_dict, dict_to_obs, obs_space_info
-from util_ppo import convert_maObs_to_saObs, all_maObs_to_saObs
+from util_algo import convert_maObs_to_saObs, all_maObs_to_saObs
 
 class DummyVecEnv(VecEnv):
     """

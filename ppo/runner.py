@@ -1,6 +1,9 @@
+import os, sys
+sys.path.insert(1, os.getcwd() + "/common")
+
 import numpy as np
 from abc import ABC, abstractmethod
-from util_ppo import convert_maObs_to_saObs
+from util_algo import convert_maObs_to_saObs, obs_reduce_dim, flatten_obs, obs_to_listObs
 
 class AbstractEnvRunner(ABC):
     def __init__(self, *, env, model, nsteps):
@@ -17,33 +20,7 @@ class AbstractEnvRunner(ABC):
 
     @abstractmethod
     def run(self):
-        raise NotImplementedError
-
-
-def obs_reduce_dim(obs, axis):
-    reduced_obs = dict()
-    for k, v in obs.items():
-        reduced_obs[k] = np.array(v[axis])
-    return reduced_obs
-
-def flatten_obs(obs):
-    flat_obs = dict()
-    for k, v in obs.items():
-        vals = []
-        for e in v:
-            for f in e:
-                vals.append(f)
-        flat_obs[k] = np.array(vals)
-    return flat_obs
-
-def obs_to_listObs(obs, n_agents, n_batches):
-    new_obs = []
-    for i in range(n_agents * n_batches):
-        ob = dict()
-        for k, v in obs.items():
-            ob[k] = v[i]
-        new_obs.append(ob)
-    return new_obs    
+        raise NotImplementedError 
 
 class Runner(AbstractEnvRunner):
     """
