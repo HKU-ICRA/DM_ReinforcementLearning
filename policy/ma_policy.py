@@ -30,11 +30,16 @@ class MAPolicy(object):
                  stochastic=True, reuse=False, build_act=True,
                  trainable_vars=None, not_trainable_vars=None,
                  gaussian_fixed_var=True, weight_decay=0.0, ema_beta=0.99999,
+                 normalize_observations=True, normalize_returns=True,
+                 observation_range=(-5.0, 5.0),
                  **kwargs):
         self.reuse = reuse
         self.scope = scope
         self.ob_space = ob_space
         self.ac_space = deepcopy(ac_space)
+        self.normalize_observations = normalize_observations
+        self.normalize_returns = normalize_returns
+        self.observation_range = observation_range
         self.network_spec = network_spec
         self.v_network_spec = v_network_spec or self.network_spec
         self.stochastic = stochastic
@@ -106,7 +111,8 @@ class MAPolicy(object):
         #  Copy inputs to not overwrite. Don't need to pass actions to policy, so exclude these
         processed_inp = {k: v for k, v in inputs.items() if k not in self.pdtypes.keys()}
 
-        self._normalize_inputs(processed_inp)
+        if self.normalize_observations:
+            self._normalize_inputs(processed_inp)
 
         self.state_out = OrderedDict()
 
@@ -175,27 +181,33 @@ class MAPolicy(object):
                 self.sampled_action = {k: pd.sample() if self.stochastic else pd.mode()
                                        for k, pd in self.pds.items()}
             with tf.variable_scope('sampled_action_logp'):
-                self.sampled_action_logp = sum([self.pds[k].logp(self.sampled_action[k])
+                self.sampled_action_logp = sum([self.pds[k].neglogp(self.sampled_action[k])
                                                 for k in self.pdtypes.keys()])
+                #self.sampled_action_logp = sum([self.pds[k].logp(self.sampled_action[k])
+                #                                for k in self.pdtypes.keys()])
             with tf.variable_scope('entropy'):
                 self.entropy = sum([pd.entropy() for pd in self.pds.values()])
             with tf.variable_scope('taken_action_logp'):
-                self.taken_action_logp = sum([self.pds[k].logp(taken_actions[k])
+                self.taken_action_logp = sum([self.pds[k].neglogp(taken_actions[k])
                                               for k in self.pdtypes.keys()])
+                #self.taken_action_logp = sum([self.pds[k].logp(taken_actions[k])
+                #                              for k in self.pdtypes.keys()])
 
     def _init_vpred_head(self, vpred, processed_inp, vpred_scope, feedback_name):
         with tf.variable_scope(vpred_scope):
             _vpred = tf.layers.dense(vpred['main'], 1, activation=None,
                                      kernel_initializer=tf.contrib.layers.xavier_initializer())
             _vpred = tf.squeeze(_vpred, -1)
-            normalize_axes = (0, 1)
-            loss_fn = partial(l2_loss, mask=processed_inp.get(feedback_name + "_mask", None))
-            rms_class = partial(EMAMeanStd, beta=self._ema_beta)
-
-            rms_shape = [dim for i, dim in enumerate(_vpred.get_shape()) if i not in normalize_axes]
-            self.value_rms = rms_class(shape=rms_shape, scope='value0filter')
-            self.scaled_value_tensor = self.value_rms.mean + _vpred * self.value_rms.std
-            self.add_running_mean_std(rms=self.value_rms, name='feedback.value0', axes=normalize_axes)
+            if self.normalize_returns:
+                normalize_axes = (0, 1)
+                loss_fn = partial(l2_loss, mask=processed_inp.get(feedback_name + "_mask", None))
+                rms_class = partial(EMAMeanStd, beta=self._ema_beta)
+                rms_shape = [dim for i, dim in enumerate(_vpred.get_shape()) if i not in normalize_axes]
+                self.value_rms = rms_class(shape=rms_shape, scope='value0filter')
+                self.scaled_value_tensor = self.value_rms.mean + _vpred * self.value_rms.std
+                self.add_running_mean_std(rms=self.value_rms, name='feedback.value0', axes=normalize_axes)
+            else:
+                self.scaled_value_tensor = _vpred
 
     def _normalize_inputs(self, processed_inp):
         with tf.variable_scope('normalize_self_obs'):
@@ -203,7 +215,7 @@ class MAPolicy(object):
                                      scope="obsfilter", beta=self._ema_beta, per_element_update=False)
             self.add_running_mean_std("observation_self", ob_rms_self, axes=(0, 1))
             normalized = (processed_inp['observation_self'] - ob_rms_self.mean) / ob_rms_self.std
-            clipped = tf.clip_by_value(normalized, -5.0, 5.0)
+            clipped = tf.clip_by_value(normalized, self.observation_range[0], self.observation_range[1])
             processed_inp['observation_self'] = clipped
 
         for key in self.ob_space.spaces.keys():
@@ -216,7 +228,7 @@ class MAPolicy(object):
                     ob_rms = EMAMeanStd(shape=self.ob_space.spaces[key].shape[1:],
                                         scope=f"obsfilter/{key}", beta=self._ema_beta, per_element_update=False)
                     normalized = (processed_inp[key] - ob_rms.mean) / ob_rms.std
-                    processed_inp[key] = tf.clip_by_value(normalized, -5.0, 5.0)
+                    processed_inp[key] = tf.clip_by_value(normalized, self.observation_range[0], self.observation_range[1])
                     self.add_running_mean_std(key, ob_rms, axes=(0, 1, 2))
 
     def get_input_schemas(self):

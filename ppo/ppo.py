@@ -5,7 +5,6 @@ import os.path as osp
 from baselines import logger
 from collections import deque
 from baselines.common import explained_variance, set_global_seeds
-from baselines.common.policies import build_policy
 try:
     from mpi4py import MPI
 except ImportError:
@@ -97,7 +96,6 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
     tfirststart = time.perf_counter()
 
     nupdates = total_timesteps//nbatch
-
     for update in range(1, nupdates+1):
         assert nbatch % nminibatches == 0
         # Start timer
@@ -153,14 +151,9 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
             for start in range(0, nbatch, nbatch_train):
                 end = start + nbatch_train
                 mbinds = inds[start:end]
-                sl_obs = [obs[i] for i in mbinds]
-                sl_returns = np.array([returns[i] for i in mbinds])
-                sl_actions = [actions[i] for i in mbinds]
-                sl_dones = np.array([dones[i] for i in mbinds])
-                sl_values = np.array([values[i] for i in mbinds])
-                sl_neglogpacs = np.array([neglogpacs[i] for i in mbinds])
+                slices = (arr[mbinds] for arr in (np.asarray(obs), returns, np.asarray(actions), values, neglogpacs))
                 mbstates = states
-                mblossvals.append(model.train(lrnow, cliprangenow, sl_obs, sl_returns, sl_actions, sl_dones, sl_values, sl_neglogpacs, mbstates))
+                mblossvals.append(model.train(lrnow, cliprangenow, *slices, mbstates))
         
         # Feedforward --> get losses --> update
         lossvals = np.mean(mblossvals, axis=0)

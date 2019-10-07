@@ -83,14 +83,14 @@ class Runner(AbstractEnvRunner):
             actions, info = self.model.step(obs_reduce_dim(self.obs, 0))
             #mb_values += list(info['vpred'])
             list_values = list(info['vpred'])
-            mb_values.append(list_values[0])
+            mb_values.append(list_values)
             self.state = info['state']
             #mb_neglogpacs += list(info['ac_logp'])
             list_neglogpacs = list(info['ac_logp'])
-            mb_neglogpacs.append(list_neglogpacs[0])
+            mb_neglogpacs.append(list_neglogpacs)
             mb_actions.append(convert_maObs_to_saObs(actions, 0))
             #mb_dones += [d for d in self.dones for _ in range(n_agents)]
-            mb_dones.append(self.dones[0])
+            mb_dones.append(self.dones)
             #mb_obs += obs_to_listObs(obs, n_agents, n_batches)
             mb_obs.append(convert_maObs_to_saObs(obs_reduce_dim(self.obs, 0), 0))
             
@@ -106,7 +106,7 @@ class Runner(AbstractEnvRunner):
             self.obs, rewards, self.dones, infos = self.env.step(nenvs_actions)
 
             #mb_rewards += [r for r_list in rewards for r in r_list]
-            mb_rewards.append(rewards[0][0])
+            mb_rewards.append(rewards[0])
         
         #batch of steps to batch of rollouts
         #mb_obs = np.asarray(mb_obs, dtype=self.obs.dtype)
@@ -115,7 +115,7 @@ class Runner(AbstractEnvRunner):
         mb_values = np.asarray(mb_values, dtype=np.float64)
         mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float64)
         mb_dones = np.asarray(mb_dones, dtype=np.bool)
-        last_values = 0 # last value is just zero
+        last_values = self.model.value(obs_reduce_dim(self.obs, 0))[0]
 
         infos = [{'r': np.mean(mb_rewards), 'l': 250}]
         epinfos += infos
@@ -124,19 +124,7 @@ class Runner(AbstractEnvRunner):
         mb_returns = np.zeros_like(mb_rewards)
         mb_advs = np.zeros_like(mb_rewards)
         lastgaelam = 0
-        '''
-        for b in range(n_batches):
-            for t in reversed(range(b, all_nsteps - n_batches + b + 1, n_batches)):
-                for a in range(n_agents):
-                    if n_agents * t + a == n_agents * (all_nsteps - n_batches + b) + a:
-                        nextnonterminal = 1.0 - mb_dones[n_agents * t + a]
-                        nextvalues = last_values
-                    else:
-                        nextnonterminal = 1.0 - mb_dones[n_agents * t + a + 1]
-                        nextvalues = mb_values[n_agents * t + a + 1]
-                    delta = mb_rewards[n_agents * t + a] + self.gamma * nextvalues * nextnonterminal - mb_values[n_agents * t + a]
-                    mb_advs[n_agents * t + a] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam\
-        '''
+        
         for t in reversed(range(self.nsteps)):
             if t == self.nsteps - 1:
                 nextnonterminal = 1.0 - self.dones
@@ -148,7 +136,7 @@ class Runner(AbstractEnvRunner):
             mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
 
         mb_returns = mb_advs + mb_values
-        return mb_obs, mb_actions, mb_returns, mb_dones, mb_values, mb_neglogpacs, mb_states, epinfos
+        return mb_obs, mb_actions, (*map(sf01, (mb_returns, mb_dones, mb_values, mb_neglogpacs))), mb_states, epinfos
     
     def record_render(self, eval_env):
         obs = eval_env.reset()
