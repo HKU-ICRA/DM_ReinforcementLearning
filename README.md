@@ -6,7 +6,7 @@ The following algorithms are well-known in the reinforcement-learning community 
 
 | Algorithms | Multi-agent | Past simple env | Viewer | Multi-env |
 | --- | --- | --- | --- | --- |
-| PPO | <ul><li>- [x] item1 | <ul><li>[ ]</li><li> | <ul><li>[x]</li><li> | <ul><li>[ ]</li><li> |
+| PPO | &#9745; | <ul><li>[ ]</li><li> | <ul><li>[x]</li><li> | <ul><li>[ ]</li><li> |
 | DDPG | <ul><li>[x]</li><li> | <ul><li>[ ]</li><li> | <ul><li>[x]</li><li> | <ul><li>[ ]</li><li> |
 
 # Research algorithms
