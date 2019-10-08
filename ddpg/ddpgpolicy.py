@@ -94,12 +94,11 @@ class DdpgPolicy(MAPolicy):
 
         return preprocess_act_output(outputs['qval'])
     
-    def tensor_eval(self, tensor, observation, action, extra_feed_dict={}):
+    def tensor_eval(self, tensor, observation, action=None, extra_feed_dict={}):
         # Add timestep dimension to observations
         obs = deepcopy(observation)
-        act = deepcopy(action)
         n_agents = observation['observation_self'].shape[0]
-
+    
         # Make sure that there are as many states as there are agents.
         # This should only happen with the zero state.
         for k, v in self.state.items():
@@ -113,12 +112,14 @@ class DdpgPolicy(MAPolicy):
         inputs = self.prepare_input(observation=obs, state_in=self.state)
         feed_dict = {self.phs[k]: v for k, v in inputs.items()}
 
-        for k, v in act.items():
-            act[k] = np.expand_dims(v, 1)
-        act_feed_dict = {self.phs[k]: v for k, v in act.items()}
-        feed_dict.update(act_feed_dict)
-        feed_dict.update(extra_feed_dict)
+        if action is not None:
+            act = deepcopy(action)
+            for k, v in act.items():
+                act[k] = np.expand_dims(v, 1)
+            act_feed_dict = {self.phs[k]: v for k, v in act.items()}
+            feed_dict.update(act_feed_dict)
 
+        feed_dict.update(extra_feed_dict)
         outputs = tf.get_default_session().run(tensor, feed_dict)
 
         # Remove time dimension from outputs

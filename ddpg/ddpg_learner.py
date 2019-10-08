@@ -127,13 +127,7 @@ class DDPG(object):
         self._running_mean_stds = {}
 
         self.obs_rms = network.obs_rms
-    
-        # Return normalization.
-        if self.normalize_returns:
-            with tf.variable_scope('ret_rms'):
-                self.ret_rms = RunningMeanStd()
-        else:
-            self.ret_rms = None
+        self.ret_rms = network.value_rms
 
         # Create networks and core TF parts that are shared across setup parts.
         self.actor_tf = network.sampled_action
@@ -266,9 +260,10 @@ class DDPG(object):
             q = None
 
         if self.action_noise is not None and apply_noise:
-            noise = self.action_noise()
-            assert noise.shape == action[0].shape
-            action += noise
+            for k, v in self.action_noise.items():
+                noise = self.action_noise[k]()
+                assert noise.shape == action[k][0].shape
+                action[k] += noise
         
         for k, v in action.items():
             action[k] = np.clip(v, self.action_range[0], self.action_range[1])
@@ -282,8 +277,6 @@ class DDPG(object):
         for b in range(B):
             #self.memory.append(obs0[b], action[b], reward[b], obs1[b], terminal1[b])
             self.memory.append(obs0, action, reward, obs1, terminal1)
-            if self.normalize_observations:
-                self.obs_rms.update(np.array([obs0[b]]))
 
     def train(self):
         # Get a batch.
@@ -295,7 +288,6 @@ class DDPG(object):
                 self.rewards: batch['rewards'],
                 self.terminals1: batch['terminals1'].astype('float32'),
             })
-            self.ret_rms.update(target_Q.flatten())
             self.sess.run(self.renormalize_Q_outputs_op, feed_dict={
                 self.old_std : np.array([old_std]),
                 self.old_mean : np.array([old_mean]),
@@ -337,10 +329,8 @@ class DDPG(object):
             # Get a sample and keep that fixed for all further computations.
             # This allows us to estimate the change in value for the same set of inputs.
             self.stats_sample = self.memory.sample(batch_size=self.batch_size)
-        values = self.sess.run(self.stats_ops, feed_dict={
-            self.obs0: self.stats_sample['obs0'],
-            self.actions: self.stats_sample['actions'],
-        })
+        values = self.network.tensor_eval(self.stats_ops, batch_obs_to_dictObs(self.stats_sample['obs0']),
+                                          action=batch_act_to_dictAct(self.stats_sample['actions']))
 
         names = self.stats_names[:]
         assert len(names) == len(values)
@@ -381,7 +371,8 @@ class DDPG(object):
     def reset(self):
         # Reset internal state after an episode is complete.
         if self.action_noise is not None:
-            self.action_noise.reset()
+            for k, v in self.action_noise.items():
+                self.action_noise[k].reset()
         if self.param_noise is not None:
             self.sess.run(self.perturb_policy_ops, feed_dict={
                 self.param_noise_stddev: self.param_noise.current_stddev,

@@ -1,9 +1,11 @@
 import os, sys
+import os.path as osp
 import time
 from collections import deque
 import pickle
 
 import numpy as np
+import functools
 
 from ddpg_learner import DDPG
 from ddpgpolicy import DdpgPolicy
@@ -11,6 +13,7 @@ from memory import Memory
 from noise import AdaptiveParamNoiseSpec, NormalActionNoise, OrnsteinUhlenbeckActionNoise
 from baselines.common import set_global_seeds
 import baselines.common.tf_util as U
+from baselines.common.tf_util import save_variables, load_variables
 from baselines import logger
 try:
     from mpi4py import MPI
@@ -37,10 +40,14 @@ def learn(env,
           clip_norm=None,
           nb_train_steps=50, # per epoch cycle and MPI worker,
           nb_eval_steps=100,
+          nb_save_epochs=None,
           batch_size=64, # per MPI worker
           tau=0.01,
           action_range=(-250.0, 250.0),
+          observation_range=(-5.0, 5.0),
           eval_env=None,
+          load_path=None,
+          save_dir=None,
           param_noise_adaption_interval=50,
           **network_kwargs):
 
@@ -102,8 +109,8 @@ def learn(env,
                  stochastic=False, reuse=False, build_act=True,
                  trainable_vars=None, not_trainable_vars=None,
                  gaussian_fixed_var=False, weight_decay=0.0, ema_beta=0.99999,
-                 normalize_observations=False, normalize_returns=False,
-                 observation_range=(-5.0, 5.0))
+                 normalize_observations=normalize_observations, normalize_returns=normalize_returns,
+                 observation_range=observation_range)
 
     action_noise = None
     param_noise = None
@@ -116,11 +123,17 @@ def learn(env,
                 _, stddev = current_noise_type.split('_')
                 param_noise = AdaptiveParamNoiseSpec(initial_stddev=float(stddev), desired_action_stddev=float(stddev))
             elif 'normal' in current_noise_type:
-                _, stddev = current_noise_type.split('_')
-                action_noise = NormalActionNoise(mu=np.zeros(nb_actions), sigma=float(stddev) * np.ones(nb_actions))
+                action_noise = dict()
+                for k, v in env.action_space.spaces.items():
+                    act_size = v.spaces[0].shape[-1]
+                    _, stddev = current_noise_type.split('_')
+                    action_noise[k] = NormalActionNoise(mu=np.zeros(act_size), sigma=float(stddev) * np.ones(act_size))
             elif 'ou' in current_noise_type:
-                _, stddev = current_noise_type.split('_')
-                action_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(nb_actions), sigma=float(stddev) * np.ones(nb_actions))
+                action_noise = dict()
+                for k, v in env.action_space.spaces.items():
+                    act_size = v.spaces[0].shape[-1]
+                    _, stddev = current_noise_type.split('_')
+                    action_noise[k] = OrnsteinUhlenbeckActionNoise(mu=np.zeros(act_size), sigma=float(stddev) * np.ones(act_size))
             else:
                 raise RuntimeError('unknown noise type "{}"'.format(current_noise_type))
 
@@ -138,12 +151,17 @@ def learn(env,
     eval_episode_rewards_history = deque(maxlen=100)
     episode_rewards_history = deque(maxlen=100)
     sess = U.get_session()
+
+    saver = functools.partial(save_variables, sess=sess)
+    loader = functools.partial(load_variables, sess=sess)
+    if load_path != None:
+        loader(load_path)
+
     # Prepare everything.
     agent.initialize(sess)
     sess.graph.finalize()
 
     agent.reset()
-
     obs = env.reset()
     if eval_env is not None:
         eval_obs = eval_env.reset()
@@ -216,8 +234,6 @@ def learn(env,
                         if nenvs == 1:
                             agent.reset()
 
-
-
             # Train.
             epoch_actor_losses = []
             epoch_critic_losses = []
@@ -268,7 +284,6 @@ def learn(env,
         combined_stats['rollout/return_history'] = np.mean(episode_rewards_history)
         combined_stats['rollout/return_history_std'] = np.std(episode_rewards_history)
         combined_stats['rollout/episode_steps'] = np.mean(epoch_episode_steps)
-        combined_stats['rollout/actions_mean'] = np.mean(epoch_actions)
         combined_stats['rollout/Q_mean'] = np.mean(epoch_qs)
         combined_stats['train/loss_actor'] = np.mean(epoch_actor_losses)
         combined_stats['train/loss_critic'] = np.mean(epoch_critic_losses)
@@ -277,7 +292,6 @@ def learn(env,
         combined_stats['total/steps_per_second'] = float(t) / float(duration)
         combined_stats['total/episodes'] = episodes
         combined_stats['rollout/episodes'] = epoch_episodes
-        combined_stats['rollout/actions_std'] = np.std(epoch_actions)
         # Evaluation statistics.
         if eval_env is not None:
             combined_stats['eval/return'] = eval_episode_rewards
@@ -317,7 +331,140 @@ def learn(env,
             if eval_env and hasattr(eval_env, 'get_state'):
                 with open(os.path.join(logdir, 'eval_env_state.pkl'), 'wb') as f:
                     pickle.dump(eval_env.get_state(), f)
-
+        
+        if nb_save_epochs != None and (epoch + 1) % nb_save_epochs == 0:
+            if save_dir == None:
+                checkdir = osp.join(logger.get_dir(), 'checkpoints')
+            else:
+                checkdir = osp.join(save_dir, 'checkpoints')
+            os.makedirs(checkdir, exist_ok=True)
+            savepath = osp.join(checkdir, '%.5i'%epoch)
+            print('Saving to', savepath)
+            saver(savepath)
 
     return agent
+
+def view(env,
+          seed=None,
+          total_timesteps=None,
+          reward_scale=1.0,
+          render=False,
+          render_eval=False,
+          noise_type='adaptive-param_0.2',
+          normalize_returns=False,
+          normalize_observations=True,
+          critic_l2_reg=1e-2,
+          actor_lr=1e-4,
+          critic_lr=1e-3,
+          popart=False,
+          gamma=0.99,
+          clip_norm=None,
+          nb_train_steps=50, # per epoch cycle and MPI worker,
+          nb_eval_steps=100,
+          nb_save_epochs=None,
+          batch_size=64, # per MPI worker
+          tau=0.01,
+          action_range=(-250.0, 250.0),
+          observation_range=(-5.0, 5.0),
+          eval_env=None,
+          load_path=None,
+          save_dir=None,
+          param_noise_adaption_interval=50,
+          **network_kwargs):
+
+    set_global_seeds(seed)
+
+    if MPI is not None:
+        rank = MPI.COMM_WORLD.Get_rank()
+    else:
+        rank = 0
+
+    memory = Memory(limit=int(1e6))
     
+    network_spec = [
+            {
+                'layer_type': 'dense',
+                'units': int (128),
+                'activation': 'relu',
+                'nodes_in': ['main'],
+                'nodes_out': ['main']
+            },
+            {
+                'layer_type': 'dense',
+                'units': int (128),
+                'activation': 'relu',
+                'nodes_in': ['main'],
+                'nodes_out': ['main']
+            }
+        ]
+    
+    vnetwork_spec = [
+            {
+                'layer_type': 'concat',
+                'nodes_in': ['action_movement', 'observation_self'],
+                'nodes_out': ['main']
+            },
+            {
+                'layer_type': 'dense',
+                'units': int (128),
+                'activation': 'relu',
+                'nodes_in': ['main'],
+                'nodes_out': ['main']
+            },
+            {
+                'layer_type': 'dense',
+                'units': int (128),
+                'activation': 'relu',
+                'nodes_in': ['main'],
+                'nodes_out': ['main']
+            }
+        ]
+
+    network = DdpgPolicy(scope="ddpg", ob_space=env.observation_space, ac_space=env.action_space, network_spec=network_spec, v_network_spec=vnetwork_spec,
+                 stochastic=False, reuse=False, build_act=True,
+                 trainable_vars=None, not_trainable_vars=None,
+                 gaussian_fixed_var=False, weight_decay=0.0, ema_beta=0.99999,
+                 normalize_observations=normalize_observations, normalize_returns=normalize_returns,
+                 observation_range=observation_range)
+
+    max_action = action_range[1]
+    logger.info('scaling actions by {} before executing in env'.format(max_action))
+
+    agent = DDPG(network, memory, env.observation_space, env.action_space,
+        gamma=gamma, tau=tau, normalize_returns=normalize_returns, normalize_observations=normalize_observations,
+        batch_size=batch_size, action_noise=None, param_noise=None, critic_l2_reg=critic_l2_reg,
+        actor_lr=actor_lr, critic_lr=critic_lr, enable_popart=popart, clip_norm=clip_norm,
+        reward_scale=reward_scale)
+    logger.info('Using agent with the following configuration:')
+    logger.info(str(agent.__dict__.items()))
+
+    sess = U.get_session()
+
+    loader = functools.partial(load_variables, sess=sess)
+    if load_path != None:
+        loader(load_path)
+
+    # Prepare everything.
+    agent.initialize(sess)
+    sess.graph.finalize()
+
+    nenvs = env.num_envs
+    obs = env.reset()
+    n_agents = obs['observation_self'].shape[0]
+
+    for epoch in range(total_timesteps):
+        agent.reset()
+        obs = env.reset()
+        while True:
+            action, q, _, _ = agent.step(obs, apply_noise=False, compute_Q=False)
+            # max_action is of dimension A, whereas action is dimension (nenvs, A) - the multiplication gets broadcasted to the batch
+            for k, v in action.items():
+                action[k] *= max_action
+            nenvs_actions = []
+            for i in range(nenvs):
+                nenv_action = {'action_movement' : action['action_movement'][i*n_agents:(i + 1)*n_agents]}
+                nenvs_actions.append(nenv_action)
+            obs, r, done, info = env.step(nenvs_actions)
+            env.render()
+            if True in done:
+                break
