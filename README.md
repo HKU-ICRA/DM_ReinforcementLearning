@@ -4,7 +4,7 @@ This repository contains code to train multi-agent environments for decision mak
 # Common algorithms
 The following algorithms are well-known in the reinforcement-learning community and serves as a baseline for benchmarking our research algorithms:
 
-| Algorithms | Multi-agent | Past simple env | Viewer | Multi-env |
+| Algorithms | Multi-agent? | Past simple env? | Viewer? | Multi-env? |
 | --- | --- | --- | --- | --- |
 | PPO | ☑ | ☐ | ☑ | ☐ |
 | DDPG | ☑ | ☐ | ☑ | ☐ |
