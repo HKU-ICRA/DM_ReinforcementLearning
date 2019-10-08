@@ -6,8 +6,8 @@ The following algorithms are well-known in the reinforcement-learning community 
 
 | Algorithms | Multi-agent | Past simple env | Viewer | Multi-env |
 | --- | --- | --- | --- | --- |
-| PPO | &#9745; | <ul><li>[ ]</li><li> | <ul><li>[x]</li><li> | <ul><li>[ ]</li><li> |
-| DDPG | <ul><li>[x]</li><li> | <ul><li>[ ]</li><li> | <ul><li>[x]</li><li> | <ul><li>[ ]</li><li> |
+| PPO | ☑ | ☐ | ☑ | ☐ |
+| DDPG | ☑ | ☐ | ☑ | ☐ |
 
 # Research algorithms
 The following algorithms are specifically tailored to our tasks:
