@@ -4,8 +4,10 @@ This repository contains code to train multi-agent environments for decision mak
 # Common algorithms
 The following algorithms are well-known in the reinforcement-learning community and serves as a baseline for benchmarking our research algorithms:
 
-1. PPO
-2. DDPG
+| Algorithms | Multi-agent | Past simple env | Viewer | Multi-env |
+| --- | --- | --- | --- | --- |
+| PPO | <ul><li>[x]</li><li> | <ul><li>[ ]</li><li> | <ul><li>[x]</li><li> | <ul><li>[ ]</li><li> |
+| DDPG | <ul><li>[x]</li><li> | <ul><li>[ ]</li><li> | <ul><li>[x]</li><li> | <ul><li>[ ]</li><li> |
 
 # Research algorithms
 The following algorithms are specifically tailored to our tasks:
