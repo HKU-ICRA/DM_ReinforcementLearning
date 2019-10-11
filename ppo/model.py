@@ -5,8 +5,7 @@ import numpy as np
 import tensorflow as tf
 import functools
 
-from baselines.common.tf_util import get_session, save_variables, load_variables
-from baselines.common.tf_util import initialize
+from baselines.common.tf_util import get_session, save_variables, load_variables, initialize
 
 from ppopolicy import PpoPolicy
 
@@ -42,7 +41,9 @@ class Model(object):
     - Save load the model
     """
     def __init__(self, ob_space, ac_space, nbatch_act, nbatch_train,
-                nsteps, ent_coef, vf_coef, max_grad_norm, mpi_rank_weight=1, comm=None, microbatch_size=None):
+                nsteps, ent_coef, vf_coef, max_grad_norm, mpi_rank_weight=1,
+                comm=None, microbatch_size=None,
+                normalize_observations=True, normalize_returns=True):
         self.sess = sess = get_session()
 
         if MPI is not None and comm is None:
@@ -52,7 +53,23 @@ class Model(object):
         network_spec = [
             {
                 'layer_type': 'dense',
+                'units': int (256),
+                'activation': 'relu',
+                'nodes_in': ['main'],
+                'nodes_out': ['main']
+            },
+            {
+                'layer_type': 'dense',
                 'units': int (128),
+                'activation': 'relu',
+                'nodes_in': ['main'],
+                'nodes_out': ['main']
+            }
+        ]
+        vnetwork_spec = [
+            {
+                'layer_type': 'dense',
+                'units': int (256),
                 'activation': 'relu',
                 'nodes_in': ['main'],
                 'nodes_out': ['main']
@@ -66,16 +83,18 @@ class Model(object):
             }
         ]
         # Act model that is used for both sampling
-        act_model = PpoPolicy(scope='ppo', ob_space=ob_space, ac_space=ac_space, network_spec=network_spec, v_network_spec=None,
+        act_model = PpoPolicy(scope='ppo', ob_space=ob_space, ac_space=ac_space, network_spec=network_spec, v_network_spec=vnetwork_spec,
                 stochastic=True, reuse=False, build_act=True,
                 trainable_vars=None, not_trainable_vars=None,
-                gaussian_fixed_var=True, weight_decay=0.0, ema_beta=0.99999)
+                gaussian_fixed_var=True, weight_decay=0.0, ema_beta=0.99999,
+                normalize_observations=normalize_observations, normalize_returns=normalize_returns)
 
         # Train model for training
-        train_model = PpoPolicy(scope='ppo', ob_space=ob_space, ac_space=ac_space, network_spec=network_spec, v_network_spec=None,
+        train_model = PpoPolicy(scope='ppo', ob_space=ob_space, ac_space=ac_space, network_spec=network_spec, v_network_spec=vnetwork_spec,
                     stochastic=True, reuse=True, build_act=True,
                     trainable_vars=None, not_trainable_vars=None,
-                    gaussian_fixed_var=True, weight_decay=0.0, ema_beta=0.99999)
+                    gaussian_fixed_var=True, weight_decay=0.0, ema_beta=0.99999,
+                    normalize_observations=normalize_observations, normalize_returns=normalize_returns)
         
         with tf.variable_scope("loss", reuse=False):
             # CREATE THE PLACEHOLDERS
@@ -139,6 +158,7 @@ class Model(object):
         # 3. Calculate the gradients
         grads_and_var = self.trainer.compute_gradients(loss, params)
         grads, var = zip(*grads_and_var)
+        self.grads = grads
 
         if max_grad_norm is not None:
             # Clip the gradients (normalize)
@@ -212,98 +232,6 @@ class Model(object):
             #td_map[self.train_model.phs['vpred_net_lstm2_state_c']] = np.repeat([states['vpred_net_lstm2_state_c'][0]], len(obs), 0)
             #td_map[self.train_model.phs['vpred_net_lstm2_state_h']] = np.repeat([states['vpred_net_lstm2_state_h'][0]], len(obs), 0)
 
-        #var_check = self.sess.run(self.vpred, td_map)
+        #var_check = self.sess.run(self.grads, td_map)
         #print(var_check)
         return self.sess.run(self.stats_list + [self._train_op], td_map)[:-1]
-
-'''
-network_spec = [
-                {
-                    'layer_type': 'circ_conv1d',
-                    'nodes_in': ['lidar'],
-                    'nodes_out': ['lidar_conv'],
-                    'filters': 10,
-                    'kernel_size': 3,
-                    'activation': 'relu'
-                },
-                {
-                    'layer_type': 'flatten_outer',
-                    'nodes_in': ['lidar_conv'],
-                    'nodes_out': ['lidar_conv']
-                },
-                {
-                    'layer_type': 'concat',
-                    'nodes_in': ['observation_self', 'lidar_conv'],
-                    'nodes_out': ['main']
-                },
-                {
-                    'layer_type': 'dense',
-                    'units': int (128),
-                    'activation': 'relu',
-                    'nodes_in': ['main'],
-                    'nodes_out': ['main']
-                },
-                {
-                    'layer_type': 'layernorm',
-                    'nodes_in': ['main'],
-                    'nodes_out': ['main']
-                },
-                {
-                    'layer_type': 'concat',
-                    'nodes_in': ['observation_self', 'agent_qpos_qvel'],
-                    'nodes_out': ['agent_qpos_qvel_dense']
-                },
-                {
-                    'layer_type': 'dense',
-                    'units': int (128),
-                    'activation': 'relu',
-                    'nodes_in': ['agent_qpos_qvel_dense'],
-                    'nodes_out': ['agent_qpos_qvel_dense']
-                },
-                {
-                    'layer_type': 'layernorm',
-                    'nodes_in': ['agent_qpos_qvel_dense'],
-                    'nodes_out': ['agent_qpos_qvel_dense']
-                },
-                {
-                    'layer_type': 'entity_concat',
-                    'nodes_in': ['main', 'agent_qpos_qvel_dense'],
-                    'nodes_out': ['main']
-                },
-                {
-                    'layer_type': 'residual_sa_block',
-                    'nodes_in': ['main'],
-                    'nodes_out': ['main'],
-                    'heads': int(4),
-                    'n_embd': int(128)
-                },
-                {
-                    'layer_type': 'entity_pooling',
-                    'nodes_in': ['main'],
-                    'nodes_out': ['main']
-                },
-                {
-                    'layer_type': 'concat',
-                    'nodes_in': ['main', 'observation_self'],
-                    'nodes_out': ['main']
-                },
-                {
-                    'layer_type': 'dense',
-                    'units': int (128),
-                    'activation': 'relu',
-                    'nodes_in': ['main'],
-                    'nodes_out': ['main']
-                },
-                {
-                    'layer_type': 'layernorm',
-                    'nodes_in': ['main'],
-                    'nodes_out': ['main']
-                },
-                {
-                    'layer_type': 'lstm',
-                    'units': int (128),
-                    'nodes_in': ['main'],
-                    'nodes_out': ['main']
-                }
-            ]
-'''

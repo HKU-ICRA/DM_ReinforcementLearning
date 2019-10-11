@@ -75,7 +75,7 @@ class Runner(AbstractEnvRunner):
             # Infos contains a ton of useful informations
             nenvs_actions = []
             for i in range(self.nenv):
-                nenv_action = {'action_movement' : actions['action_movement'][i*n_agents:(i + 1)*n_agents]}
+                nenv_action = {'action_movement' : actions['action_movement'][i*n_agents:(i + 1)*n_agents] * 10.0}
                 nenvs_actions.append(nenv_action)
 
             #self.env.step_async(nenvs_actions)
@@ -134,7 +134,7 @@ class Runner(AbstractEnvRunner):
                 actions, info = self.model.step(flatten_obs(obs))
                 nenvs_actions = []
                 for i in range(self.nenv):
-                    nenv_action = {'action_movement' : actions['action_movement'][i*n_agents:(i + 1)*n_agents]}
+                    nenv_action = {'action_movement' : actions['action_movement'][i*n_agents:(i + 1)*n_agents] * 10.0}
                     nenvs_actions.append(nenv_action)
                 obs, rewards, dones, infos = self.env.step(nenvs_actions)
                 self.env.render()

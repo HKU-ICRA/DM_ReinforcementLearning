@@ -48,7 +48,7 @@ def batch_obs_to_dictObs(obs):
         new_obs[k] = []
     for ob in obs:
         for k, v in ob[0].items():
-            new_obs[k].append(v[0][0])
+            new_obs[k].append(v[0])
     for k, v in obs[0][0].items():
         new_obs[k] = np.array(new_obs[k])
     return new_obs

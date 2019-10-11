@@ -21,7 +21,9 @@ def constfn(val):
 def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=0.0, lr=3e-4,
             vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95,
             log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
-            save_interval=0, load_path=None, save_dir=None, model_fn=None, update_fn=None, init_fn=None, mpi_rank_weight=1, comm=None, **network_kwargs):
+            save_interval=0, load_path=None, save_dir=None, model_fn=None, update_fn=None, init_fn=None,
+            normalize_observations=True, normalize_returns=True,
+            mpi_rank_weight=1, comm=None, **network_kwargs):
     '''
     Learn policy using PPO algorithm (https://arxiv.org/abs/1707.06347)
     Parameters:
@@ -74,7 +76,8 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
     model_fn = Model
     model = model_fn(ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=nbatch_train,
                     nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
-                    max_grad_norm=max_grad_norm, comm=comm, mpi_rank_weight=mpi_rank_weight)
+                    max_grad_norm=max_grad_norm, comm=comm, mpi_rank_weight=mpi_rank_weight,
+                    normalize_observations=normalize_observations, normalize_returns=normalize_returns)
 
     if load_path is not None:
         model.load(load_path)
@@ -207,7 +210,9 @@ def safemean(xs):
 def view(env, total_timesteps, episodes=5, seed=None, nsteps=2048, ent_coef=0.0, lr=3e-4,
             vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95,
             log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
-            save_interval=0, load_path=None, save_dir=None, model_fn=None, update_fn=None, init_fn=None, mpi_rank_weight=1, comm=None, **network_kwargs):
+            save_interval=0, load_path=None, save_dir=None, model_fn=None, update_fn=None, init_fn=None,
+            normalize_observations=False, normalize_returns=False,
+            mpi_rank_weight=1, comm=None, **network_kwargs):
   
     set_global_seeds(seed)
 
@@ -233,7 +238,8 @@ def view(env, total_timesteps, episodes=5, seed=None, nsteps=2048, ent_coef=0.0,
     model_fn = Model
     model = model_fn(ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=nbatch_train,
                     nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
-                    max_grad_norm=max_grad_norm, comm=comm, mpi_rank_weight=mpi_rank_weight)
+                    max_grad_norm=max_grad_norm, comm=comm, mpi_rank_weight=mpi_rank_weight,
+                    normalize_observations=normalize_observations, normalize_returns=normalize_returns)
 
     if load_path is not None:
         model.load(load_path)
