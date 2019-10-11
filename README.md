@@ -6,7 +6,7 @@ The following algorithms are well-known in the reinforcement-learning community 
 
 | Algorithms | Multi-agent? | Past simple env? | Viewer? | Multi-env? | Obs norm | Rew norm
 | --- | --- | --- | --- | --- | --- | --- |
-| PPO | ☑ | ☐ | ☑ | ☐ | ☐ | ☐ |
+| PPO | ☑ | ☑ | ☑ | ☐ | ☐ | ☐ |
 | DDPG | ☑ | ☑<sup>1</sup> | ☑ | ☐ | ☐ | ☐ |
 
 <sup>1</sup> Gaussian noise diverges but Ornstein Uhlenbeck converges.
@@ -17,6 +17,10 @@ The following algorithms are specifically tailored to our tasks:
 '''TBD'''
 
 # Common algorithms details
+
+| Algorithm | Clipping | KL-divergence |
+| --- | --- | --- |
+| PPO | ☑ | ☐ |
 
 | Algorithm | Gaussian noise | Ornstein Uhlenbeck noise | Adaptive noise | Pop-art |
 | --- | --- | --- | --- | --- |
