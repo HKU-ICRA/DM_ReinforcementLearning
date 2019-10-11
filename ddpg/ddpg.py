@@ -69,7 +69,7 @@ def learn(env,
     network_spec = [
             {
                 'layer_type': 'dense',
-                'units': int (128),
+                'units': int (256),
                 'activation': 'relu',
                 'nodes_in': ['main'],
                 'nodes_out': ['main']
@@ -78,6 +78,13 @@ def learn(env,
                 'layer_type': 'dense',
                 'units': int (128),
                 'activation': 'relu',
+                'nodes_in': ['main'],
+                'nodes_out': ['main']
+            },
+            {
+                'layer_type': 'dense',
+                'units': int (1),
+                'activation': 'tanh',
                 'nodes_in': ['main'],
                 'nodes_out': ['main']
             }
@@ -91,7 +98,7 @@ def learn(env,
             },
             {
                 'layer_type': 'dense',
-                'units': int (128),
+                'units': int (256),
                 'activation': 'relu',
                 'nodes_in': ['main'],
                 'nodes_out': ['main']
@@ -102,10 +109,24 @@ def learn(env,
                 'activation': 'relu',
                 'nodes_in': ['main'],
                 'nodes_out': ['main']
+            },
+            {
+                'layer_type': 'dense',
+                'units': int (1),
+                'activation': '',
+                'nodes_in': ['main'],
+                'nodes_out': ['main']
             }
         ]
 
     network = DdpgPolicy(scope="ddpg", ob_space=env.observation_space, ac_space=env.action_space, network_spec=network_spec, v_network_spec=vnetwork_spec,
+                 stochastic=False, reuse=False, build_act=True,
+                 trainable_vars=None, not_trainable_vars=None,
+                 gaussian_fixed_var=False, weight_decay=0.0, ema_beta=0.99999,
+                 normalize_observations=normalize_observations, normalize_returns=normalize_returns,
+                 observation_range=observation_range)
+    
+    target_network = DdpgPolicy(scope="target", ob_space=env.observation_space, ac_space=env.action_space, network_spec=network_spec, v_network_spec=vnetwork_spec,
                  stochastic=False, reuse=False, build_act=True,
                  trainable_vars=None, not_trainable_vars=None,
                  gaussian_fixed_var=False, weight_decay=0.0, ema_beta=0.99999,
@@ -140,7 +161,7 @@ def learn(env,
     max_action = action_range[1]
     logger.info('scaling actions by {} before executing in env'.format(max_action))
 
-    agent = DDPG(network, memory, env.observation_space, env.action_space,
+    agent = DDPG(network, target_network, memory, env.observation_space, env.action_space,
         gamma=gamma, tau=tau, normalize_returns=normalize_returns, normalize_observations=normalize_observations,
         batch_size=batch_size, action_noise=action_noise, param_noise=param_noise, critic_l2_reg=critic_l2_reg,
         actor_lr=actor_lr, critic_lr=critic_lr, enable_popart=popart, clip_norm=clip_norm,
@@ -207,7 +228,7 @@ def learn(env,
                     nenvs_actions.append(nenv_action)
                 new_obs, r, done, info = env.step(nenvs_actions)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
                 # note these outputs are batched from vecenv
-
+                
                 t += 1
                 if rank == 0 and render:
                     env.render()
@@ -384,7 +405,7 @@ def view(env,
     network_spec = [
             {
                 'layer_type': 'dense',
-                'units': int (128),
+                'units': int (256),
                 'activation': 'relu',
                 'nodes_in': ['main'],
                 'nodes_out': ['main']
@@ -393,6 +414,13 @@ def view(env,
                 'layer_type': 'dense',
                 'units': int (128),
                 'activation': 'relu',
+                'nodes_in': ['main'],
+                'nodes_out': ['main']
+            },
+            {
+                'layer_type': 'dense',
+                'units': int (1),
+                'activation': 'tanh',
                 'nodes_in': ['main'],
                 'nodes_out': ['main']
             }
@@ -406,7 +434,7 @@ def view(env,
             },
             {
                 'layer_type': 'dense',
-                'units': int (128),
+                'units': int (256),
                 'activation': 'relu',
                 'nodes_in': ['main'],
                 'nodes_out': ['main']
@@ -415,6 +443,13 @@ def view(env,
                 'layer_type': 'dense',
                 'units': int (128),
                 'activation': 'relu',
+                'nodes_in': ['main'],
+                'nodes_out': ['main']
+            },
+            {
+                'layer_type': 'dense',
+                'units': int (1),
+                'activation': '',
                 'nodes_in': ['main'],
                 'nodes_out': ['main']
             }
@@ -426,11 +461,18 @@ def view(env,
                  gaussian_fixed_var=False, weight_decay=0.0, ema_beta=0.99999,
                  normalize_observations=normalize_observations, normalize_returns=normalize_returns,
                  observation_range=observation_range)
+    
+    target_network = DdpgPolicy(scope="target", ob_space=env.observation_space, ac_space=env.action_space, network_spec=network_spec, v_network_spec=vnetwork_spec,
+                 stochastic=False, reuse=False, build_act=True,
+                 trainable_vars=None, not_trainable_vars=None,
+                 gaussian_fixed_var=False, weight_decay=0.0, ema_beta=0.99999,
+                 normalize_observations=normalize_observations, normalize_returns=normalize_returns,
+                 observation_range=observation_range)
 
     max_action = action_range[1]
     logger.info('scaling actions by {} before executing in env'.format(max_action))
 
-    agent = DDPG(network, memory, env.observation_space, env.action_space,
+    agent = DDPG(network, target_network, memory, env.observation_space, env.action_space,
         gamma=gamma, tau=tau, normalize_returns=normalize_returns, normalize_observations=normalize_observations,
         batch_size=batch_size, action_noise=None, param_noise=None, critic_l2_reg=critic_l2_reg,
         actor_lr=actor_lr, critic_lr=critic_lr, enable_popart=popart, clip_norm=clip_norm,
@@ -464,6 +506,7 @@ def view(env,
             for i in range(nenvs):
                 nenv_action = {'action_movement' : action['action_movement'][i*n_agents:(i + 1)*n_agents]}
                 nenvs_actions.append(nenv_action)
+            print(nenvs_actions)
             obs, r, done, info = env.step(nenvs_actions)
             env.render()
             if True in done:
