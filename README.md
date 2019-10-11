@@ -16,6 +16,11 @@ The following algorithms are specifically tailored to our tasks:
 
 '''TBD'''
 
+# Common algorithms details
+
+| Algorithm | Gaussian noise | Ornstein Uhlenbeck noise | Adaptive noise | Pop-art |
+| DDPG | ☑ | ☑ | ☐ | ☐ |
+
 # Core dependencies
 1. [Tensorflow](https://www.tensorflow.org/)
 2. [Openai-baseline](https://github.com/openai/baselines)
