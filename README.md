@@ -8,6 +8,7 @@ The following algorithms are well-known in the reinforcement-learning community 
 | --- | --- | --- | --- | --- |
 | PPO | ☑ | ☐ | ☑ | ☐ |
 | DDPG | ☑ | ☑<sup>1</sup> | ☑ | ☐ |
+
 <sup>1</sup>Normal noise diverges but OU works perfectly fine
 
 # Research algorithms
