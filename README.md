@@ -9,7 +9,7 @@ The following algorithms are well-known in the reinforcement-learning community 
 | PPO | ☑ | ☐ | ☑ | ☐ |
 | DDPG | ☑ | ☑<sup>1</sup> | ☑ | ☐ |
 
-<sup>1</sup>Normal noise diverges but OU works perfectly fine
+<sup>1</sup> Gaussian noise diverges but Ornstein Uhlenbeck converges.
 
 # Research algorithms
 The following algorithms are specifically tailored to our tasks:
