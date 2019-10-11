@@ -19,6 +19,7 @@ The following algorithms are specifically tailored to our tasks:
 # Common algorithms details
 
 | Algorithm | Gaussian noise | Ornstein Uhlenbeck noise | Adaptive noise | Pop-art |
+| --- | --- | --- | --- | --- |
 | DDPG | ☑ | ☑ | ☐ | ☐ |
 
 # Core dependencies
