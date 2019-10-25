@@ -1,4 +1,5 @@
 import os, sys
+from copy import deepcopy
 sys.path.insert(1, os.getcwd() + "/common")
 
 import numpy as np
@@ -51,31 +52,34 @@ class Runner(AbstractEnvRunner):
         n_batches = self.obs['observation_self'].shape[0]
         n_agents = self.obs['observation_self'][0].shape[0]
 
-        for _ in range(all_nsteps):
+        for _ in range(self.nsteps):
             # Given observations, get action value and neglopacs
             # We already have self.obs because Runner superclass run self.obs[:] = env.reset() on init
             #obs = flatten_obs(self.obs)
 
             #actions, info = self.model.step(obs, n_agents, n_batches)
-            actions, info = self.model.step(obs_reduce_dim(self.obs, 0))
+            actions, info = self.model.step(obs_reduce_dim(deepcopy(self.obs), 0))
+            info = deepcopy(info)
+            actions = deepcopy(actions)
             #mb_values += list(info['vpred'])
             list_values = list(info['vpred'])
             mb_values.append(list_values)
             self.state = info['state']
             #mb_neglogpacs += list(info['ac_logp'])
-            list_neglogpacs = list(info['ac_logp'])
+            list_neglogpacs = list(info['ac_neglogp'])
             mb_neglogpacs.append(list_neglogpacs)
             mb_actions.append(convert_maObs_to_saObs(actions, 0))
             #mb_dones += [d for d in self.dones for _ in range(n_agents)]
             mb_dones.append(self.dones)
             #mb_obs += obs_to_listObs(obs, n_agents, n_batches)
-            mb_obs.append(convert_maObs_to_saObs(obs_reduce_dim(self.obs, 0), 0))
+            obs_cpy = deepcopy(self.obs)
+            mb_obs.append(convert_maObs_to_saObs(obs_reduce_dim(obs_cpy, 0), 0))
             
             # Take actions in env and look the results
             # Infos contains a ton of useful informations
             nenvs_actions = []
             for i in range(self.nenv):
-                nenv_action = {'action_movement' : actions['action_movement'][i*n_agents:(i + 1)*n_agents] * 10.0}
+                nenv_action = {'action_movement' : actions['action_movement'][i*n_agents:(i + 1)*n_agents]}
                 nenvs_actions.append(nenv_action)
 
             #self.env.step_async(nenvs_actions)
@@ -92,7 +96,7 @@ class Runner(AbstractEnvRunner):
         mb_values = np.asarray(mb_values, dtype=np.float64)
         mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float64)
         mb_dones = np.asarray(mb_dones, dtype=np.bool)
-        last_values = self.model.value(obs_reduce_dim(self.obs, 0))[0]
+        last_values = self.model.value(obs_reduce_dim(deepcopy(self.obs), 0))[0]
 
         infos = [{'r': np.mean(mb_rewards), 'l': 250}]
         epinfos += infos
@@ -113,7 +117,7 @@ class Runner(AbstractEnvRunner):
             mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
 
         mb_returns = mb_advs + mb_values
-        return mb_obs, mb_actions, (*map(sf01, (mb_returns, mb_dones, mb_values, mb_neglogpacs))), mb_states, epinfos
+        return np.asarray(mb_obs), np.asarray(mb_actions), (*map(sf01, (mb_returns, mb_dones, mb_values, mb_neglogpacs))), mb_states, epinfos
     
     def record_render(self, eval_env):
         obs = eval_env.reset()
@@ -134,7 +138,7 @@ class Runner(AbstractEnvRunner):
                 actions, info = self.model.step(flatten_obs(obs))
                 nenvs_actions = []
                 for i in range(self.nenv):
-                    nenv_action = {'action_movement' : actions['action_movement'][i*n_agents:(i + 1)*n_agents] * 10.0}
+                    nenv_action = {'action_movement' : actions['action_movement'][i*n_agents:(i + 1)*n_agents]}
                     nenvs_actions.append(nenv_action)
                 obs, rewards, dones, infos = self.env.step(nenvs_actions)
                 self.env.render()

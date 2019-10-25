@@ -1,7 +1,8 @@
-import os
+import os, sys
 import time
 import numpy as np
 import os.path as osp
+
 from baselines import logger
 from collections import deque
 from baselines.common import explained_variance, set_global_seeds
@@ -23,7 +24,7 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
             log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
             save_interval=0, load_path=None, save_dir=None, model_fn=None, update_fn=None, init_fn=None,
             normalize_observations=True, normalize_returns=True,
-            mpi_rank_weight=1, comm=None, **network_kwargs):
+            mpi_rank_weight=1, comm=None, use_tensorboard=False, tb_log_dir=None, **network_kwargs):
     '''
     Learn policy using PPO algorithm (https://arxiv.org/abs/1707.06347)
     Parameters:
@@ -77,7 +78,8 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
     model = model_fn(ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=nbatch_train,
                     nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
                     max_grad_norm=max_grad_norm, comm=comm, mpi_rank_weight=mpi_rank_weight,
-                    normalize_observations=normalize_observations, normalize_returns=normalize_returns)
+                    normalize_observations=normalize_observations, normalize_returns=normalize_returns,
+                    use_tensorboard=use_tensorboard, tb_log_dir=tb_log_dir)
 
     if load_path is not None:
         model.load(load_path)
@@ -85,6 +87,7 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
     if eval_env is not None:
         eval_runner = Runner(env = eval_env, model = model, nsteps = nsteps, gamma = gamma, lam= lam)
     '''
+
     # Instantiate the runner object
     runner = Runner(env=env, model=model, nsteps=nsteps, gamma=gamma, lam=lam)
 
@@ -154,7 +157,7 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
             for start in range(0, nbatch, nbatch_train):
                 end = start + nbatch_train
                 mbinds = inds[start:end]
-                slices = (arr[mbinds] for arr in (np.asarray(obs), returns, np.asarray(actions), values, neglogpacs))
+                slices = (arr[mbinds] for arr in (obs, returns, actions, values, neglogpacs))
                 mbstates = states
                 mblossvals.append(model.train(lrnow, cliprangenow, *slices, mbstates))
         

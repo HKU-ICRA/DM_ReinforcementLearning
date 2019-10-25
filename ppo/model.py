@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, datetime
 sys.path.insert(1, os.getcwd() + "/policy")
 
 import numpy as np
@@ -43,8 +43,10 @@ class Model(object):
     def __init__(self, ob_space, ac_space, nbatch_act, nbatch_train,
                 nsteps, ent_coef, vf_coef, max_grad_norm, mpi_rank_weight=1,
                 comm=None, microbatch_size=None,
-                normalize_observations=True, normalize_returns=True):
+                normalize_observations=True, normalize_returns=True,
+                use_tensorboard=False, tb_log_dir=None):
         self.sess = sess = get_session()
+        self.use_tensorboard = use_tensorboard
 
         if MPI is not None and comm is None:
             comm = MPI.COMM_WORLD
@@ -54,6 +56,20 @@ class Model(object):
             {
                 'layer_type': 'dense',
                 'units': int (256),
+                'activation': 'relu',
+                'nodes_in': ['observation_self'],
+                'nodes_out': ['main']
+            },
+            {
+                'layer_type': 'dense',
+                'units': int (128),
+                'activation': 'relu',
+                'nodes_in': ['main'],
+                'nodes_out': ['main']
+            },
+            {
+                'layer_type': 'dense',
+                'units': int (128),
                 'activation': 'relu',
                 'nodes_in': ['main'],
                 'nodes_out': ['main']
@@ -70,6 +86,20 @@ class Model(object):
             {
                 'layer_type': 'dense',
                 'units': int (256),
+                'activation': 'relu',
+                'nodes_in': ['observation_self'],
+                'nodes_out': ['main']
+            },
+            {
+                'layer_type': 'dense',
+                'units': int (128),
+                'activation': 'relu',
+                'nodes_in': ['main'],
+                'nodes_out': ['main']
+            },
+            {
+                'layer_type': 'dense',
+                'units': int (128),
                 'activation': 'relu',
                 'nodes_in': ['main'],
                 'nodes_out': ['main']
@@ -96,60 +126,61 @@ class Model(object):
                     gaussian_fixed_var=True, weight_decay=0.0, ema_beta=0.99999,
                     normalize_observations=normalize_observations, normalize_returns=normalize_returns)
         
-        with tf.variable_scope("loss", reuse=False):
-            # CREATE THE PLACEHOLDERS
-            self.A = A = train_model.phs['action_movement']
-            self.ADV = ADV = tf.placeholder(tf.float32, [None])
-            self.R = R = tf.placeholder(tf.float32, [None])
-            # Keep track of old actor
-            self.OLDNEGLOGPAC = OLDNEGLOGPAC = tf.placeholder(tf.float32, [None])
-            # Keep track of old critic
-            self.OLDVPRED = OLDVPRED = tf.placeholder(tf.float32, [None])
-            self.LR = LR = tf.placeholder(tf.float32, [])
-            # Cliprange
-            self.CLIPRANGE = CLIPRANGE = tf.placeholder(tf.float32, [])
+        # CREATE THE PLACEHOLDERS
+        act_sh = {k: v.sample_placeholder([None]) for k, v in train_model.pdtypes.items()}
+        self.A = A = act_sh['action_movement']
+        self.ADV = ADV = tf.placeholder(tf.float32, [None])
+        self.R = R = tf.placeholder(tf.float32, [None])
+        # Keep track of old actor
+        self.OLDNEGLOGPAC = OLDNEGLOGPAC = tf.placeholder(tf.float32, [None])
+        # Keep track of old critic
+        self.OLDVPRED = OLDVPRED = tf.placeholder(tf.float32, [None])
+        self.LR = LR = tf.placeholder(tf.float32, [])
+        # Cliprange
+        self.CLIPRANGE = CLIPRANGE = tf.placeholder(tf.float32, [])
 
-            neglogpac = train_model.taken_action_logp
+        #neglogpac = train_model.taken_action_neglogp
+        neglogpac = train_model.pds['action_movement'].neglogp(A)#sum([train_model.pds[k].neglogp(act_sh[k]) for k in train_model.pdtypes.keys()])
 
-            # Calculate the entropy
-            # Entropy is used to improve exploration by limiting the premature convergence to suboptimal policy.
-            entropy = tf.reduce_mean(train_model.entropy)
+        # Calculate the entropy
+        # Entropy is used to improve exploration by limiting the premature convergence to suboptimal policy.
+        entropy = tf.reduce_mean(train_model.pds['action_movement'].entropy())
 
-            # CALCULATE THE LOSS
-            # Total loss = Policy gradient loss - entropy * entropy coefficient + Value coefficient * value loss
+        # CALCULATE THE LOSS
+        # Total loss = Policy gradient loss - entropy * entropy coefficient + Value coefficient * value loss
 
-            # Clip the value to reduce variability during Critic training
-            # Get the predicted value
-            vpred = train_model.scaled_value_tensor
-            #self.vpred = vpred
-            vpredclipped = OLDVPRED + tf.clip_by_value(vpred - OLDVPRED, - CLIPRANGE, CLIPRANGE)
-            # Unclipped value
-            vf_losses1 = tf.square(vpred - R)
-            # Clipped value
-            vf_losses2 = tf.square(vpredclipped - R)
+        # Clip the value to reduce variability during Critic training
+        # Get the predicted value
+        vpred = train_model.scaled_value_tensor
+        #self.vpred = vpred
+        vpredclipped = OLDVPRED + tf.clip_by_value(vpred - OLDVPRED, - CLIPRANGE, CLIPRANGE)
+        # Unclipped value
+        vf_losses1 = tf.square(vpred - R)
+        # Clipped value
+        vf_losses2 = tf.square(vpredclipped - R)
 
-            vf_loss = .5 * tf.reduce_mean(tf.maximum(vf_losses1, vf_losses2))
+        vf_loss = .5 * tf.reduce_mean(tf.maximum(vf_losses1, vf_losses2))
 
-            # Calculate ratio (pi current policy / pi old policy)
-            ratio = tf.exp(OLDNEGLOGPAC - neglogpac)
+        # Calculate ratio (pi current policy / pi old policy)
+        ratio = tf.exp(OLDNEGLOGPAC - neglogpac)
 
-            # Defining Loss = - J is equivalent to max J
-            pg_losses = -ADV * ratio
+        # Defining Loss = - J is equivalent to max J
+        pg_losses = -ADV * ratio
 
-            pg_losses2 = -ADV * tf.clip_by_value(ratio, 1.0 - CLIPRANGE, 1.0 + CLIPRANGE)
+        pg_losses2 = -ADV * tf.clip_by_value(ratio, 1.0 - CLIPRANGE, 1.0 + CLIPRANGE)
 
-            # Final PG loss
-            pg_loss = tf.reduce_mean(tf.maximum(pg_losses, pg_losses2))
-            approxkl = .5 * tf.reduce_mean(tf.square(neglogpac - OLDNEGLOGPAC))
-            clipfrac = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(ratio - 1.0), CLIPRANGE)))
+        # Final PG loss
+        pg_loss = tf.reduce_mean(tf.maximum(pg_losses, pg_losses2))
+        approxkl = .5 * tf.reduce_mean(tf.square(neglogpac - OLDNEGLOGPAC))
+        clipfrac = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(ratio - 1.0), CLIPRANGE)))
 
-            # Total loss
-            loss = pg_loss - entropy * ent_coef + vf_loss * vf_coef
-            #self.loss = loss
+        # Total loss
+        loss = pg_loss - entropy * ent_coef + vf_loss * vf_coef
+        #self.loss = loss
 
         # UPDATE THE PARAMETERS USING LOSS
         # 1. Get the model parameters
-        params = tf.trainable_variables()#train_model.get_trainable_variables()
+        params = tf.trainable_variables(scope="ppo")
         # 2. Build our trainer
         if comm is not None and comm.Get_size() > 1:
             self.trainer = MpiAdamOptimizer(comm, learning_rate=LR, mpi_rank_weight=mpi_rank_weight, epsilon=1e-5)
@@ -158,7 +189,6 @@ class Model(object):
         # 3. Calculate the gradients
         grads_and_var = self.trainer.compute_gradients(loss, params)
         grads, var = zip(*grads_and_var)
-        self.grads = grads
 
         if max_grad_norm is not None:
             # Clip the gradients (normalize)
@@ -184,9 +214,13 @@ class Model(object):
         self.load = functools.partial(load_variables, sess=sess)
 
         initialize()
-        global_variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)#, scope="")
+        global_variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
         if MPI is not None:
             sync_from_root(sess, global_variables, comm=comm) #pylint: disable=E1101
+
+        if self.use_tensorboard:
+            self.attach_tensorboard(tb_log_dir)
+            self.tb_step = 0
 
     def train(self, lr, cliprange, obs, returns, actions, values, neglogpacs, states=None):
         # Here we calculate advantage A(s,a) = R + yV(s') - V(s)
@@ -195,7 +229,7 @@ class Model(object):
         
         # Normalize the advantages
         advs = (advs - advs.mean()) / (advs.std() + 1e-8)
-        
+
         # Turn the obs into correct format
         phs_obs_self = []
         phs_obs_agentqvelqpos = []
@@ -210,7 +244,7 @@ class Model(object):
         
         phs_action = []
         for a in actions:
-            phs_action.append(a['action_movement'])
+            phs_action.append(a['action_movement'][0])
 
         td_map = {
             self.train_model.phs['observation_self'] : phs_obs_self,
@@ -234,4 +268,21 @@ class Model(object):
 
         #var_check = self.sess.run(self.grads, td_map)
         #print(var_check)
-        return self.sess.run(self.stats_list + [self._train_op], td_map)[:-1]
+
+        if self.use_tensorboard:
+            losses = self.sess.run(self.stats_list + [self._train_op, self.merged], td_map)
+            self.tb_writer.add_summary(losses.pop(), self.tb_step)
+            self.tb_step += 1
+            losses = losses[:-1]
+        else:
+            losses = self.sess.run(self.stats_list + [self._train_op], td_map)[:-1]
+
+        return losses
+    
+    def attach_tensorboard(self, logdir):
+        for i in range(len(self.stats_list)):
+            tf.summary.scalar(self.loss_names[i], self.stats_list[i])
+        self.merged = tf.summary.merge_all()
+        logdir = os.path.join(os.getcwd(), logdir)
+        logdir = os.path.join(logdir, datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
+        self.tb_writer = tf.summary.FileWriter(logdir, self.sess.graph)

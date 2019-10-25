@@ -43,19 +43,20 @@ class PpoPolicy(MAPolicy):
         # Value network
         (vpred,
          vpred_state_out,
-         vpred_reset_ops) = construct_tf_graph(processed_inp, self.v_network_spec, scope='vpred_net')
+         vpred_reset_ops) = construct_tf_graph(processed_inp, self.v_network_spec, scope='vpred_net', reuse=self.reuse)
 
         self._init_vpred_head(vpred, processed_inp, 'vpred_out0', "value0")
 
         # Policy network
         (pi,
          pi_state_out,
-         pi_reset_ops) = construct_tf_graph(processed_inp, self.network_spec, scope='policy_net')
+         pi_reset_ops) = construct_tf_graph(processed_inp, self.network_spec, scope='policy_net', reuse=self.reuse)
 
         self.state_out.update(vpred_state_out)
         self.state_out.update(pi_state_out)
         self._reset_ops += vpred_reset_ops + pi_reset_ops
         self._init_policy_out(pi, taken_actions)
+
         if self.weight_decay != 0.0:
             kernels = [var for var in self.get_trainable_variables() if 'kernel' in var.name]
             w_norm_sum = tf.reduce_sum([tf.nn.l2_loss(var) for var in kernels])
@@ -66,10 +67,10 @@ class PpoPolicy(MAPolicy):
         self.reset()
 
     def _init_policy_out(self, pi, taken_actions):
-        with tf.variable_scope('policy_out'):
+        with tf.variable_scope('policy_out', reuse=self.reuse):
             self.pdparams = {}
             for k in self.pdtypes.keys():
-                with tf.variable_scope(k):
+                with tf.variable_scope(k, reuse=self.reuse):
                     if self.gaussian_fixed_var and isinstance(self.ac_space.spaces[k], gym.spaces.Box):
                         mean = tf.layers.dense(pi["main"],
                                                self.pdtypes[k].param_shape()[0] // 2,
@@ -97,28 +98,25 @@ class PpoPolicy(MAPolicy):
                                                            kernel_initializer=normc_initializer(0.01),
                                                            activation=None)
 
-            with tf.variable_scope('pds'):
-                self.pds = {k: pdtype.pdfromflat(self.pdparams[k])
-                            for k, pdtype in self.pdtypes.items()}
+            with tf.variable_scope('pds', reuse=self.reuse):
+                self.pds = {k: pdtype.pdfromflat(self.pdparams[k]) for k, pdtype in self.pdtypes.items()}
 
-            with tf.variable_scope('sampled_action'):
-                self.sampled_action = {k: pd.sample() if self.stochastic else pd.mode()
-                                       for k, pd in self.pds.items()}
-            with tf.variable_scope('sampled_action_logp'):
-                #self.sampled_action_logp = sum([self.pds[k].neglogp(self.sampled_action[k])
-                #                                for k in self.pdtypes.keys()])
-                self.sampled_action_logp = sum([self.pds[k].logp(self.sampled_action[k])
-                                                for k in self.pdtypes.keys()])
-            with tf.variable_scope('entropy'):
+            with tf.variable_scope('sampled_action', reuse=self.reuse):
+                self.sampled_action = {k: pd.sample() if self.stochastic else pd.mode() for k, pd in self.pds.items()}
+
+            with tf.variable_scope('sampled_action_logp', reuse=self.reuse):
+                self.sampled_action_neglogp = sum([self.pds[k].neglogp(self.sampled_action[k]) for k in self.pdtypes.keys()])
+                self.sampled_action_logp = sum([self.pds[k].logp(self.sampled_action[k]) for k in self.pdtypes.keys()])
+
+            with tf.variable_scope('entropy', reuse=False):
                 self.entropy = sum([pd.entropy() for pd in self.pds.values()])
-            with tf.variable_scope('taken_action_logp'):
-                #self.taken_action_logp = sum([self.pds[k].neglogp(taken_actions[k])
-                #                              for k in self.pdtypes.keys()])
-                self.taken_action_logp = sum([self.pds[k].logp(taken_actions[k])
-                                              for k in self.pdtypes.keys()])
+
+            with tf.variable_scope('taken_action_logp', reuse=False):
+                self.taken_action_neglogp = sum([self.pds[k].neglogp(taken_actions[k]) for k in self.pdtypes.keys()])
+                self.taken_action_logp = sum([self.pds[k].logp(taken_actions[k]) for k in self.pdtypes.keys()])
 
     def _init_vpred_head(self, vpred, processed_inp, vpred_scope, feedback_name):
-        with tf.variable_scope(vpred_scope):
+        with tf.variable_scope(vpred_scope, reuse=self.reuse):
             _vpred = tf.layers.dense(vpred['main'], 1, activation=None,
                                      kernel_initializer=tf.contrib.layers.xavier_initializer())
             _vpred = tf.squeeze(_vpred, -1)
@@ -160,6 +158,7 @@ class PpoPolicy(MAPolicy):
         outputs = {
             'ac': self.sampled_action,
             'ac_logp': self.sampled_action_logp,
+            'ac_neglogp': self.sampled_action_neglogp,
             'vpred': self.scaled_value_tensor,
             'state': self.state_out}
         # Add timestep dimension to observations
@@ -192,6 +191,7 @@ class PpoPolicy(MAPolicy):
 
         info = {'vpred': preprocess_act_output(outputs['vpred']),
                 'ac_logp': preprocess_act_output(outputs['ac_logp']),
+                'ac_neglogp': preprocess_act_output(outputs['ac_neglogp']),
                 'state': outputs['state']}
 
         return preprocess_act_output(outputs['ac']), info
@@ -200,6 +200,7 @@ class PpoPolicy(MAPolicy):
         outputs = {
             'ac': self.sampled_action,
             'ac_logp': self.sampled_action_logp,
+            'ac_neglogp': self.sampled_action_neglogp,
             'vpred': self.scaled_value_tensor,
             'state': self.state_out}
         # Add timestep dimension to observations
@@ -232,6 +233,7 @@ class PpoPolicy(MAPolicy):
 
         info = {'vpred': preprocess_act_output(outputs['vpred']),
                 'ac_logp': preprocess_act_output(outputs['ac_logp']),
+                'ac_neglogp': preprocess_act_output(outputs['ac_neglogp']),
                 'state': outputs['state']}
 
         return preprocess_act_output(outputs['ac']), info
