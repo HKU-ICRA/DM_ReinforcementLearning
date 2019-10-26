@@ -75,8 +75,8 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
 
     # Instantiate the model object (that creates act_model and train_model)
     model_fn = Model
-    model = model_fn(ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=nbatch_train,
-                    nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
+    model = model_fn(ob_space=ob_space, ac_space=ac_space,
+                    ent_coef=ent_coef, vf_coef=vf_coef,
                     max_grad_norm=max_grad_norm, comm=comm, mpi_rank_weight=mpi_rank_weight,
                     normalize_observations=normalize_observations, normalize_returns=normalize_returns,
                     use_tensorboard=use_tensorboard, tb_log_dir=tb_log_dir)
@@ -157,9 +157,11 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
             for start in range(0, nbatch, nbatch_train):
                 end = start + nbatch_train
                 mbinds = inds[start:end]
-                slices = (arr[mbinds] for arr in (obs, returns, actions, values, neglogpacs))
+                slices = (arr[mbinds] for arr in (returns, values, neglogpacs))
                 mbstates = states
-                mblossvals.append(model.train(lrnow, cliprangenow, *slices, mbstates))
+                slice_obs = {k: np.asarray(v)[mbinds] for k, v in obs.items()}
+                slice_actions = {k: np.asarray(v)[mbinds] for k, v in actions.items()}
+                mblossvals.append(model.train(lrnow, cliprangenow, slice_obs, slice_actions, *slices, mbstates))
         
         # Feedforward --> get losses --> update
         lossvals = np.mean(mblossvals, axis=0)
@@ -210,20 +212,11 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
 def safemean(xs):
     return np.nan if len(xs) == 0 else np.mean(xs)
 
-def view(env, total_timesteps, episodes=5, seed=None, nsteps=2048, ent_coef=0.0, lr=3e-4,
-            vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95,
-            log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
-            save_interval=0, load_path=None, save_dir=None, model_fn=None, update_fn=None, init_fn=None,
-            normalize_observations=False, normalize_returns=False,
-            mpi_rank_weight=1, comm=None, **network_kwargs):
+def view(env, total_timesteps, episodes=5, seed=None, nsteps=2048, 
+        load_path=None, model_fn=None, update_fn=None, init_fn=None,
+        normalize_observations=False, normalize_returns=False):
   
     set_global_seeds(seed)
-
-    if isinstance(lr, float): lr = constfn(lr)
-    else: assert callable(lr)
-    if isinstance(cliprange, float): cliprange = constfn(cliprange)
-    else: assert callable(cliprange)
-    total_timesteps = int(total_timesteps)
 
     # Get the nb of env
     nenvs = env.num_envs
@@ -232,21 +225,13 @@ def view(env, total_timesteps, episodes=5, seed=None, nsteps=2048, ent_coef=0.0,
     ob_space = env.observation_space
     ac_space = env.action_space
 
-    # Calculate the batch_size
-    nbatch = nenvs * nsteps
-    nbatch_train = nbatch // nminibatches
-    is_mpi_root = (MPI is None or MPI.COMM_WORLD.Get_rank() == 0)
-
     # Instantiate the model object (that creates act_model and train_model)
-    model_fn = Model
-    model = model_fn(ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=nbatch_train,
-                    nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
-                    max_grad_norm=max_grad_norm, comm=comm, mpi_rank_weight=mpi_rank_weight,
+    model = Model(ob_space=ob_space, ac_space=ac_space, ent_coef=0.0, vf_coef=0.5, max_grad_norm=0.5,
                     normalize_observations=normalize_observations, normalize_returns=normalize_returns)
 
     if load_path is not None:
         model.load(load_path)
 
     # Instantiate the runner object
-    runner = Runner(env=env, model=model, nsteps=nsteps, gamma=gamma, lam=lam)
+    runner = Runner(env=env, model=model, nsteps=nsteps, gamma=0.99, lam=0.95)
     runner.render(episodes)

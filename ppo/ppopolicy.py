@@ -104,16 +104,14 @@ class PpoPolicy(MAPolicy):
             with tf.variable_scope('sampled_action', reuse=self.reuse):
                 self.sampled_action = {k: pd.sample() if self.stochastic else pd.mode() for k, pd in self.pds.items()}
 
-            with tf.variable_scope('sampled_action_logp', reuse=self.reuse):
+            with tf.variable_scope('sampled_action_neglogp', reuse=self.reuse):
                 self.sampled_action_neglogp = sum([self.pds[k].neglogp(self.sampled_action[k]) for k in self.pdtypes.keys()])
-                self.sampled_action_logp = sum([self.pds[k].logp(self.sampled_action[k]) for k in self.pdtypes.keys()])
 
             with tf.variable_scope('entropy', reuse=False):
                 self.entropy = sum([pd.entropy() for pd in self.pds.values()])
 
-            with tf.variable_scope('taken_action_logp', reuse=False):
+            with tf.variable_scope('taken_action_neglogp', reuse=False):
                 self.taken_action_neglogp = sum([self.pds[k].neglogp(taken_actions[k]) for k in self.pdtypes.keys()])
-                self.taken_action_logp = sum([self.pds[k].logp(taken_actions[k]) for k in self.pdtypes.keys()])
 
     def _init_vpred_head(self, vpred, processed_inp, vpred_scope, feedback_name):
         with tf.variable_scope(vpred_scope, reuse=self.reuse):
@@ -157,7 +155,6 @@ class PpoPolicy(MAPolicy):
     def act(self, observation, extra_feed_dict={}):
         outputs = {
             'ac': self.sampled_action,
-            'ac_logp': self.sampled_action_logp,
             'ac_neglogp': self.sampled_action_neglogp,
             'vpred': self.scaled_value_tensor,
             'state': self.state_out}
@@ -190,7 +187,6 @@ class PpoPolicy(MAPolicy):
                 return np.squeeze(act_output, 1)
 
         info = {'vpred': preprocess_act_output(outputs['vpred']),
-                'ac_logp': preprocess_act_output(outputs['ac_logp']),
                 'ac_neglogp': preprocess_act_output(outputs['ac_neglogp']),
                 'state': outputs['state']}
 
@@ -199,7 +195,6 @@ class PpoPolicy(MAPolicy):
     def act_in_parallel(self, observation, n_agents, n_batches, extra_feed_dict={}):
         outputs = {
             'ac': self.sampled_action,
-            'ac_logp': self.sampled_action_logp,
             'ac_neglogp': self.sampled_action_neglogp,
             'vpred': self.scaled_value_tensor,
             'state': self.state_out}
@@ -232,7 +227,6 @@ class PpoPolicy(MAPolicy):
                 return np.squeeze(act_output, 1)
 
         info = {'vpred': preprocess_act_output(outputs['vpred']),
-                'ac_logp': preprocess_act_output(outputs['ac_logp']),
                 'ac_neglogp': preprocess_act_output(outputs['ac_neglogp']),
                 'state': outputs['state']}
 

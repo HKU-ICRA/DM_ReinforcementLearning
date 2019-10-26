@@ -11,10 +11,7 @@ class AbstractEnvRunner(ABC):
         self.env = env
         self.model = model
         self.nenv = nenv = env.num_envs if hasattr(env, 'num_envs') else 1
-
-        #for k, v in env.observation_space.items():
-        #    self.batch_ob_shape[k] = (nenv*nsteps,) + v.shape
-        self.obs = env.reset()#[env.reset() for _ in range(nenv)]
+        self.obs = env.reset()
         self.nsteps = nsteps
         self.states = model.initial_state
         self.dones = [False for _ in range(nenv)]
@@ -42,7 +39,9 @@ class Runner(AbstractEnvRunner):
 
     def run(self):
         # Here, we init the lists that will contain the mb of experiences
-        mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, mb_neglogpacs = [],[],[],[],[],[]
+        mb_rewards, mb_values, mb_dones, mb_neglogpacs = [],[],[],[]
+        mb_obs = {k: [] for k in self.env.observation_space.spaces.keys()}
+        mb_actions = {k: [] for k in self.env.action_space.spaces.keys()}
         mb_states = self.states
         epinfos = []
         # For n in range number of steps
@@ -55,25 +54,15 @@ class Runner(AbstractEnvRunner):
         for _ in range(self.nsteps):
             # Given observations, get action value and neglopacs
             # We already have self.obs because Runner superclass run self.obs[:] = env.reset() on init
-            #obs = flatten_obs(self.obs)
-
-            #actions, info = self.model.step(obs, n_agents, n_batches)
             actions, info = self.model.step(obs_reduce_dim(deepcopy(self.obs), 0))
-            info = deepcopy(info)
-            actions = deepcopy(actions)
-            #mb_values += list(info['vpred'])
-            list_values = list(info['vpred'])
-            mb_values.append(list_values)
+            mb_values.append(list(info['vpred']))
+            mb_neglogpacs.append(list(info['ac_neglogp']))
+            mb_dones.append(self.dones)  
             self.state = info['state']
-            #mb_neglogpacs += list(info['ac_logp'])
-            list_neglogpacs = list(info['ac_neglogp'])
-            mb_neglogpacs.append(list_neglogpacs)
-            mb_actions.append(convert_maObs_to_saObs(actions, 0))
-            #mb_dones += [d for d in self.dones for _ in range(n_agents)]
-            mb_dones.append(self.dones)
-            #mb_obs += obs_to_listObs(obs, n_agents, n_batches)
-            obs_cpy = deepcopy(self.obs)
-            mb_obs.append(convert_maObs_to_saObs(obs_reduce_dim(obs_cpy, 0), 0))
+            for k, v in actions.items():
+                mb_actions[k].append(v[0])
+            for k, v in deepcopy(self.obs).items():
+                mb_obs[k].append(v[0])
             
             # Take actions in env and look the results
             # Infos contains a ton of useful informations
@@ -82,21 +71,16 @@ class Runner(AbstractEnvRunner):
                 nenv_action = {'action_movement' : actions['action_movement'][i*n_agents:(i + 1)*n_agents]}
                 nenvs_actions.append(nenv_action)
 
-            #self.env.step_async(nenvs_actions)
-            #self.obs, rewards, self.dones, infos = self.env.step_wait()
             self.obs, rewards, self.dones, infos = self.env.step(nenvs_actions)
 
-            #mb_rewards += [r for r_list in rewards for r in r_list]
             mb_rewards.append(rewards[0])
         
         #batch of steps to batch of rollouts
-        #mb_obs = np.asarray(mb_obs, dtype=self.obs.dtype)
-        #mb_actions = np.asarray(mb_actions)
         mb_rewards = np.asarray(mb_rewards, dtype=np.float64)
         mb_values = np.asarray(mb_values, dtype=np.float64)
         mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float64)
         mb_dones = np.asarray(mb_dones, dtype=np.bool)
-        last_values = self.model.value(obs_reduce_dim(deepcopy(self.obs), 0))[0]
+        last_values = self.model.value(obs_reduce_dim(self.obs, 0))[0]
 
         infos = [{'r': np.mean(mb_rewards), 'l': 250}]
         epinfos += infos
@@ -117,7 +101,7 @@ class Runner(AbstractEnvRunner):
             mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
 
         mb_returns = mb_advs + mb_values
-        return np.asarray(mb_obs), np.asarray(mb_actions), (*map(sf01, (mb_returns, mb_dones, mb_values, mb_neglogpacs))), mb_states, epinfos
+        return mb_obs, mb_actions, (*map(sf01, (mb_returns, mb_dones, mb_values, mb_neglogpacs))), mb_states, epinfos
     
     def record_render(self, eval_env):
         obs = eval_env.reset()

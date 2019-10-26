@@ -40,9 +40,8 @@ class Model(object):
     save/load():
     - Save load the model
     """
-    def __init__(self, ob_space, ac_space, nbatch_act, nbatch_train,
-                nsteps, ent_coef, vf_coef, max_grad_norm, mpi_rank_weight=1,
-                comm=None, microbatch_size=None,
+    def __init__(self, ob_space, ac_space, ent_coef, vf_coef,
+                max_grad_norm, mpi_rank_weight=1, comm=None,
                 normalize_observations=True, normalize_returns=True,
                 use_tensorboard=False, tb_log_dir=None):
         self.sess = sess = get_session()
@@ -112,6 +111,7 @@ class Model(object):
                 'nodes_out': ['main']
             }
         ]
+
         # Act model that is used for both sampling
         act_model = PpoPolicy(scope='ppo', ob_space=ob_space, ac_space=ac_space, network_spec=network_spec, v_network_spec=vnetwork_spec,
                 stochastic=True, reuse=False, build_act=True,
@@ -127,8 +127,7 @@ class Model(object):
                     normalize_observations=normalize_observations, normalize_returns=normalize_returns)
         
         # CREATE THE PLACEHOLDERS
-        act_sh = {k: v.sample_placeholder([None]) for k, v in train_model.pdtypes.items()}
-        self.A = A = act_sh['action_movement']
+        self.A = A = {k: v.sample_placeholder([None]) for k, v in train_model.pdtypes.items()}
         self.ADV = ADV = tf.placeholder(tf.float32, [None])
         self.R = R = tf.placeholder(tf.float32, [None])
         # Keep track of old actor
@@ -139,12 +138,11 @@ class Model(object):
         # Cliprange
         self.CLIPRANGE = CLIPRANGE = tf.placeholder(tf.float32, [])
 
-        #neglogpac = train_model.taken_action_neglogp
-        neglogpac = train_model.pds['action_movement'].neglogp(A)#sum([train_model.pds[k].neglogp(act_sh[k]) for k in train_model.pdtypes.keys()])
+        neglogpac = sum([train_model.pds[k].neglogp(A[k]) for k in train_model.pdtypes.keys()])
 
         # Calculate the entropy
         # Entropy is used to improve exploration by limiting the premature convergence to suboptimal policy.
-        entropy = tf.reduce_mean(train_model.pds['action_movement'].entropy())
+        entropy = tf.reduce_mean(train_model.entropy)
 
         # CALCULATE THE LOSS
         # Total loss = Policy gradient loss - entropy * entropy coefficient + Value coefficient * value loss
@@ -152,7 +150,6 @@ class Model(object):
         # Clip the value to reduce variability during Critic training
         # Get the predicted value
         vpred = train_model.scaled_value_tensor
-        #self.vpred = vpred
         vpredclipped = OLDVPRED + tf.clip_by_value(vpred - OLDVPRED, - CLIPRANGE, CLIPRANGE)
         # Unclipped value
         vf_losses1 = tf.square(vpred - R)
@@ -176,7 +173,6 @@ class Model(object):
 
         # Total loss
         loss = pg_loss - entropy * ent_coef + vf_loss * vf_coef
-        #self.loss = loss
 
         # UPDATE THE PARAMETERS USING LOSS
         # 1. Get the model parameters
@@ -206,7 +202,7 @@ class Model(object):
         self.train_model = train_model
         self.act_model = act_model
 
-        self.step = act_model.act#act_model.act_in_parallel
+        self.step = act_model.act
         self.value = act_model.value
         self.initial_state = act_model.zero_state
 
@@ -222,7 +218,7 @@ class Model(object):
             self.attach_tensorboard(tb_log_dir)
             self.tb_step = 0
 
-    def train(self, lr, cliprange, obs, returns, actions, values, neglogpacs, states=None):
+    def train(self, lr, cliprange, obs, actions, returns, values, neglogpacs, states=None):
         # Here we calculate advantage A(s,a) = R + yV(s') - V(s)
         # Returns = R + yV(s')
         advs = returns - values
@@ -231,26 +227,7 @@ class Model(object):
         advs = (advs - advs.mean()) / (advs.std() + 1e-8)
 
         # Turn the obs into correct format
-        phs_obs_self = []
-        phs_obs_agentqvelqpos = []
-        phs_obs_lidar = []
-        for o in obs:
-            #phs_obs_self.append([o['observation_self']])
-            #phs_obs_agentqvelqpos.append([o['agent_qpos_qvel']])
-            #phs_obs_lidar.append([o['lidar']])
-            phs_obs_self.append(o['observation_self'])
-            #phs_obs_agentqvelqpos.append(o['agent_qpos_qvel'])
-            #phs_obs_lidar.append(o['lidar'])
-        
-        phs_action = []
-        for a in actions:
-            phs_action.append(a['action_movement'][0])
-
         td_map = {
-            self.train_model.phs['observation_self'] : phs_obs_self,
-            #self.train_model.phs['agent_qpos_qvel'] : phs_obs_agentqvelqpos,
-            #self.train_model.phs['lidar'] : phs_obs_lidar,
-            self.A : phs_action,
             self.ADV : advs,
             self.R : returns,
             self.LR : lr,
@@ -258,16 +235,18 @@ class Model(object):
             self.OLDNEGLOGPAC : neglogpacs,
             self.OLDVPRED : values,
         }
-        
+
+        obs_map = {self.train_model.phs[k]: v for k, v in obs.items()}
+        td_map.update(obs_map)
+        actions_map = {self.A[k]: v for k, v in actions.items()}
+        td_map.update(actions_map)
+
         if states is not None:
             pass
             #td_map[self.train_model.phs['policy_net_lstm2_state_c']] = np.repeat([states['policy_net_lstm2_state_c'][0]], len(obs), 0)
             #td_map[self.train_model.phs['policy_net_lstm2_state_h']] = np.repeat([states['policy_net_lstm2_state_h'][0]], len(obs), 0)
             #td_map[self.train_model.phs['vpred_net_lstm2_state_c']] = np.repeat([states['vpred_net_lstm2_state_c'][0]], len(obs), 0)
             #td_map[self.train_model.phs['vpred_net_lstm2_state_h']] = np.repeat([states['vpred_net_lstm2_state_h'][0]], len(obs), 0)
-
-        #var_check = self.sess.run(self.grads, td_map)
-        #print(var_check)
 
         if self.use_tensorboard:
             losses = self.sess.run(self.stats_list + [self._train_op, self.merged], td_map)
