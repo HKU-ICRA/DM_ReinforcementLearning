@@ -6,7 +6,7 @@ The following algorithms are well-known in the reinforcement-learning community 
 
 | Algorithms | Multi-agent? | Past simple env? | Viewer? | Multi-env? | Obs norm | Rew norm
 | --- | --- | --- | --- | --- | --- | --- |
-| PPO | ☑ | ☑ | ☑ | ☐ | ☐ | ☐ |
+| PPO | ☑ | ☑ | ☑ | ☑ | ☐ | ☐ |
 | DDPG | ☑ | ☑<sup>1</sup> | ☑ | ☐ | ☐ | ☐ |
 | TD3 | ☑ | ☐ | ☐ | ☐ | ☐ | ☐ |
 
