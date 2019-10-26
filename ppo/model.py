@@ -142,7 +142,8 @@ class Model(object):
 
         # Calculate the entropy
         # Entropy is used to improve exploration by limiting the premature convergence to suboptimal policy.
-        entropy = tf.reduce_mean(train_model.entropy)
+        #entropy = tf.reduce_mean(train_model.entropy)
+        entropy = tf.reduce_mean(sum([train_model.pds[k].entropy() for k in train_model.pdtypes.keys()]))
 
         # CALCULATE THE LOSS
         # Total loss = Policy gradient loss - entropy * entropy coefficient + Value coefficient * value loss

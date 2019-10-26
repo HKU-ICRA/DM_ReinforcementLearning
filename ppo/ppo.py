@@ -116,7 +116,7 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
 
         # Get minibatch
         obs, actions, returns, dones, values, neglogpacs, states, epinfos = runner.run() #pylint: disable=E0632
-        
+
         #if eval_env is not None:
         #    eval_obs, eval_returns, eval_masks, eval_actions, eval_values, eval_neglogpacs, eval_states, eval_epinfos = eval_runner.run() #pylint: disable=E0632
 
@@ -159,8 +159,8 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
                 mbinds = inds[start:end]
                 slices = (arr[mbinds] for arr in (returns, values, neglogpacs))
                 mbstates = states
-                slice_obs = {k: np.asarray(v)[mbinds] for k, v in obs.items()}
-                slice_actions = {k: np.asarray(v)[mbinds] for k, v in actions.items()}
+                slice_obs = {k: v[mbinds] for k, v in obs.items()}
+                slice_actions = {k: v[mbinds] for k, v in actions.items()}
                 mblossvals.append(model.train(lrnow, cliprangenow, slice_obs, slice_actions, *slices, mbstates))
         
         # Feedforward --> get losses --> update

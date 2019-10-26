@@ -144,8 +144,6 @@ class PpoPolicy(MAPolicy):
                 self.state[k] = np.repeat(v, n_agents, 0)
 
         # Add time dimension to obs
-        for k, v in obs.items():
-            obs[k] = np.expand_dims(v, 1)
         inputs = self.prepare_input(observation=obs, state_in=self.state)
         feed_dict = {self.phs[k]: v for k, v in inputs.items()}
 
@@ -170,8 +168,6 @@ class PpoPolicy(MAPolicy):
                 self.state[k] = np.repeat(v, n_agents, 0)
 
         # Add time dimension to obs
-        for k, v in obs.items():
-            obs[k] = np.expand_dims(v, 1)
         inputs = self.prepare_input(observation=obs, state_in=self.state)
         feed_dict = {self.phs[k]: v for k, v in inputs.items()}
         feed_dict.update(extra_feed_dict)
