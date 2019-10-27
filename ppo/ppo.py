@@ -150,18 +150,19 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
         '''
         mblossvals = []
         inds = np.arange(nbatch)
-        for _ in range(noptepochs):
-            # Randomize the indexes
-            np.random.shuffle(inds)
-            # 0 to batch_size with batch_train_size step
-            for start in range(0, nbatch, nbatch_train):
-                end = start + nbatch_train
-                mbinds = inds[start:end]
-                slices = (arr[mbinds] for arr in (returns, values, neglogpacs))
-                mbstates = states
-                slice_obs = {k: v[mbinds] for k, v in obs.items()}
-                slice_actions = {k: v[mbinds] for k, v in actions.items()}
-                mblossvals.append(model.train(lrnow, cliprangenow, slice_obs, slice_actions, *slices, mbstates))
+        for i in range(len(obs)):
+            for _ in range(noptepochs):
+                # Randomize the indexes
+                np.random.shuffle(inds)
+                # 0 to batch_size with batch_train_size step
+                for start in range(0, nbatch, nbatch_train):
+                    end = start + nbatch_train
+                    mbinds = inds[start:end]
+                    slices = (arr[mbinds] for arr in (returns[i], values[i], neglogpacs[i]))
+                    mbstates = states
+                    slice_obs = {k: v[mbinds] for k, v in obs[i].items()}
+                    slice_actions = {k: v[mbinds] for k, v in actions[i].items()}
+                    mblossvals.append(model.train(lrnow, cliprangenow, slice_obs, slice_actions, *slices, mbstates))
         
         # Feedforward --> get losses --> update
         lossvals = np.mean(mblossvals, axis=0)
@@ -177,7 +178,7 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
         if update % log_interval == 0 or update == 1:
             # Calculates if value function is a good predicator of the returns (ev > 1)
             # or if it's just worse than predicting nothing (ev =< 0)
-            ev = explained_variance(values, returns)
+            ev = explained_variance(np.mean(values, axis=0), np.mean(returns, 0))
             logger.logkv("misc/serial_timesteps", update*nsteps)
             logger.logkv("misc/nupdates", update)
             logger.logkv("misc/total_timesteps", update*nbatch)

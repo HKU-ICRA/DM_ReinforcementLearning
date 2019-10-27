@@ -239,7 +239,7 @@ class Model(object):
 
         obs_map = {self.train_model.phs[k]: v for k, v in obs.items()}
         td_map.update(obs_map)
-        actions_map = {self.A[k]: v for k, v in actions.items()}
+        actions_map = {self.A[k]: np.squeeze(v, 1) for k, v in actions.items()}
         td_map.update(actions_map)
 
         if states is not None:
