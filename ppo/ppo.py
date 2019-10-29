@@ -150,14 +150,14 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
         '''
         mblossvals = []
         inds = np.arange(nbatch)
-        for i in range(len(obs)):
-            for _ in range(noptepochs):
-                # Randomize the indexes
-                np.random.shuffle(inds)
-                # 0 to batch_size with batch_train_size step
-                for start in range(0, nbatch, nbatch_train):
-                    end = start + nbatch_train
-                    mbinds = inds[start:end]
+        for _ in range(noptepochs):
+            # Randomize the indexes
+            np.random.shuffle(inds)
+            # 0 to batch_size with batch_train_size step
+            for start in range(0, nbatch, nbatch_train):
+                end = start + nbatch_train
+                mbinds = inds[start:end]
+                for i in range(len(obs)):
                     slices = (arr[mbinds] for arr in (returns[i], values[i], neglogpacs[i]))
                     mbstates = states
                     slice_obs = {k: v[mbinds] for k, v in obs[i].items()}
