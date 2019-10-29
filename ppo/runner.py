@@ -61,22 +61,22 @@ class Runner(AbstractEnvRunner):
             agent_actions = []
 
             for i in range(n_agents):
-                sa_obs = {k: v[0:, i] for k, v in self.obs.items()}
+                obs_dc = deepcopy(self.obs)
+                sa_obs = {k: v[:, i:i+1, :] for k, v in obs_dc.items()}
                 actions, info = self.model.step(sa_obs)
-                agent_actions.append(actions)
-                mb_values[i].append(list(info['vpred']))
-                mb_neglogpacs[i].append(list(info['ac_neglogp']))
-                self.state = info['state']
-                for k, v in actions.items():
+                actions_dc = deepcopy(actions)
+                info_dc = deepcopy(info)
+                agent_actions.append(actions_dc)
+                mb_values[i].append(info_dc['vpred'])
+                mb_neglogpacs[i].append(info_dc['ac_neglogp'])
+                self.state = info_dc['state']
+                mb_dones[i].append(deepcopy(self.dones))  
+                for k, v in actions_dc.items():
                     mb_actions[i][k].append(v)
                 for k, v in sa_obs.items():
                     mb_obs[i][k].append(v)
-            
-            for i in range(n_agents):
-                mb_dones[i].append(self.dones)  
-            
+                
             # Take actions in env and look the results
-            # Infos contains a ton of useful informations
             nenvs_actions = []
             for e in range(self.nenv):
                 per_act = {k: [] for k in agent_actions[0].keys()}
@@ -84,31 +84,30 @@ class Runner(AbstractEnvRunner):
                     for k, v in agent_actions[z].items():
                         per_act[k].append(v[e])
                 for k, v in per_act.items():
-                    per_act[k] = np.array(v[e])
+                    per_act[k] = np.array(v)
                 nenvs_actions.append(per_act)
-                
+            
             self.obs, rewards, self.dones, infos = self.env.step(nenvs_actions)
 
             for i in range(n_agents):
-                mb_rewards[i].append(rewards[:, i])
+                mb_rewards[i].append(deepcopy(rewards)[:, i:i+1])
         
         #batch of steps to batch of rollouts
-        mb_rewards = np.asarray(mb_rewards, dtype=np.float32)
-        mb_values = np.asarray(mb_values, dtype=np.float32)
-        mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
-        mb_dones = np.asarray(mb_dones, dtype=np.bool)
-
         last_values = [[] for _ in range(n_agents)]
         for i in range(n_agents):
-            sa_obs = {k: v[0:, i] for k, v in self.obs.items()}
-            last_values[i] = np.squeeze(self.model.value(sa_obs), -1)
+            mb_rewards[i] = np.squeeze(np.asarray(mb_rewards[i], dtype=np.float32), -1)
+            mb_values[i] = np.asarray(mb_values[i], dtype=np.float32)
+            mb_neglogpacs[i] = np.asarray(mb_neglogpacs[i], dtype=np.float32)
+            mb_dones[i] = np.asarray(mb_dones[i], dtype=np.bool)
+            sa_obs = {k: v[:, i:i+1, :] for k, v in deepcopy(self.obs).items()}
+            last_values[i] = np.squeeze(deepcopy(self.model.value(sa_obs)), -1)
 
         infos = [{'r': np.mean(mb_rewards), 'l': 250}]
         epinfos += infos
 
         # discount/bootstrap off value fn
-        mb_returns = np.zeros_like(mb_rewards)
-        mb_advs = np.zeros_like(mb_rewards)
+        mb_returns = [np.zeros_like(mb_rewards[i]) for i in range(n_agents)]
+        mb_advs = [np.zeros_like(mb_rewards[i]) for i in range(n_agents)]
         lastgaelam = [0 for _ in range(n_agents)]
 
         for i in range(n_agents):
@@ -124,8 +123,16 @@ class Runner(AbstractEnvRunner):
             mb_returns[i] = mb_advs[i] + mb_values[i]
 
             mb_obs[i], mb_actions[i] = dsf01(mb_obs[i]), dsf01(mb_actions[i])
+            mb_returns[i], mb_dones[i], mb_values[i], mb_neglogpacs[i] = sf01(mb_returns[i]), sf01(mb_dones[i]), sf01(mb_values[i]), sf01(mb_neglogpacs[i])
 
-        mb_returns, mb_dones, mb_values, mb_neglogpacs = sf01(mb_returns, n_agents), sf01(mb_dones, n_agents), sf01(mb_values, n_agents), sf01(mb_neglogpacs, n_agents)
+        mb_obs = dconcat(np.asarray(mb_obs))
+        mb_actions = dconcat(np.asarray(mb_actions))
+
+        mb_returns = f01(np.asarray(mb_returns))
+        mb_dones = f01(np.asarray(mb_dones))
+        mb_values = f01(np.asarray(mb_values))
+        mb_neglogpacs = f01(np.asarray(mb_neglogpacs))
+
         return mb_obs, mb_actions, mb_returns, mb_dones, mb_values, mb_neglogpacs, mb_states, epinfos
     
     def record_render(self, eval_env):
@@ -144,33 +151,56 @@ class Runner(AbstractEnvRunner):
         for _ in range(episodes):
             while True:
                 #actions, info = self.model.step(flatten_obs(obs), n_agents, n_batches)
-                actions, info = self.model.step(obs)
-                nenvs_actions = [{'action_movement' : actions['action_movement'][i*n_agents:(i + 1)*n_agents]} for i in range(self.nenv)]
-                obs, rewards, dones, infos = self.env.step(nenvs_actions)
-                self.env.render()
-                if True in dones:
-                    break
+                agent_actions = []
+                for i in range(n_agents):
+                    sa_obs = {k: v for k, v in self.obs.items()}
+                    actions, info = self.model.step(sa_obs)
+                    agent_actions.append(actions)
+
+                nenvs_actions = []
+                for e in range(self.nenv):
+                    per_act = {k: [] for k in agent_actions[0].keys()}
+                    for z in range(n_agents):
+                        for k, v in agent_actions[z].items():
+                            per_act[k].append(v[e])
+                    for k, v in per_act.items():
+                        per_act[k] = np.array([v[e]])
+                    nenvs_actions.append(per_act)
+                    nenvs_actions = [{'action_movement' : actions['action_movement'][i*n_agents:(i + 1)*n_agents]} for i in range(self.nenv)]
+                    obs, rewards, dones, infos = self.env.step(nenvs_actions)
+                    self.env.render()
+                    if True in dones:
+                        break
 
 
-def sf01(arr, n_agents):
+def sf01(arr):
     """
     swap and then flatten axes 0 and 1
     """
-    new_arr = []
-    for a in arr:
-        s = a.shape
-        new_arr.append(a.swapaxes(0, 1).reshape(s[0] * s[1], *s[2:]))
-    return np.asarray(new_arr)
+    s = arr.shape
+    return arr.swapaxes(0, 1).reshape(s[0] * s[1], *s[2:])
 
+def f01(arr):
+    """
+    swap and then flatten axes 0 and 1
+    """
+    s = arr.shape
+    return arr.reshape(s[0] * s[1], *s[2:])
 
 def dsf01(dic):
     """
     swap and then flatten axes 0 and 1 of dict
     """
     for k, v in dic.items():
-        v = np.array(v)
-        s = v.shape
-        v = v.swapaxes(0, 1).reshape(s[0] * s[1], *s[2:])
-        v = np.expand_dims(v, 1)
-        dic[k] = v
+        dic[k] = sf01(np.asarray(v))
     return dic
+
+def dconcat(arrdics):
+    """
+    Concat arrays along axes 0
+    """
+    new_arrdics = arrdics[0]
+    for i in range(1, len(arrdics)):
+        for k, v in arrdics[i].items():
+            new_arrdics[k] = np.concatenate((new_arrdics[k], v), axis=0)
+    return new_arrdics
