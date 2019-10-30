@@ -144,6 +144,8 @@ class PpoPolicy(MAPolicy):
                 self.state[k] = np.repeat(v, n_agents, 0)
 
         # Add time dimension to obs
+        #for k, v in obs.items():
+        #    obs[k] = np.expand_dims(v, 1)
         inputs = self.prepare_input(observation=obs, state_in=self.state)
         feed_dict = {self.phs[k]: v for k, v in inputs.items()}
 
@@ -168,49 +170,12 @@ class PpoPolicy(MAPolicy):
                 self.state[k] = np.repeat(v, n_agents, 0)
 
         # Add time dimension to obs
+        #for k, v in obs.items():
+        #    obs[k] = np.expand_dims(v, 1)
         inputs = self.prepare_input(observation=obs, state_in=self.state)
         feed_dict = {self.phs[k]: v for k, v in inputs.items()}
         feed_dict.update(extra_feed_dict)
 
-        outputs = tf.get_default_session().run(outputs, feed_dict)
-        self.state = outputs['state']
-
-        # Remove time dimension from outputs
-        def preprocess_act_output(act_output):
-            if isinstance(act_output, dict):
-                return {k: np.squeeze(v, 1) for k, v in act_output.items()}
-            else:
-                return np.squeeze(act_output, 1)
-
-        info = {'vpred': preprocess_act_output(outputs['vpred']),
-                'ac_neglogp': preprocess_act_output(outputs['ac_neglogp']),
-                'state': outputs['state']}
-
-        return preprocess_act_output(outputs['ac']), info
-    
-    def act_in_parallel(self, observation, n_agents, n_batches, extra_feed_dict={}):
-        outputs = {
-            'ac': self.sampled_action,
-            'ac_neglogp': self.sampled_action_neglogp,
-            'vpred': self.scaled_value_tensor,
-            'state': self.state_out}
-        # Add timestep dimension to observations
-        obs = deepcopy(observation)
-
-        # Make sure that there are as many states as there are agents.
-        # This should only happen with the zero state.
-        for k, v in self.state.items():
-            assert v.shape[0] == 1 or v.shape[0] == n_agents * n_batches
-            if v.shape[0] == 1 and v.shape[0] != n_agents:
-                self.state[k] = np.repeat(v, n_agents * n_batches, 0)
-        
-        # Add time dimension to obs
-        for k, v in obs.items():
-            obs[k] = np.expand_dims(v, 1)
-        inputs = self.prepare_input(observation=obs, state_in=self.state)
-        feed_dict = {self.phs[k]: v for k, v in inputs.items()}
-        feed_dict.update(extra_feed_dict)
-        
         outputs = tf.get_default_session().run(outputs, feed_dict)
 
         self.state = outputs['state']
@@ -227,3 +192,4 @@ class PpoPolicy(MAPolicy):
                 'state': outputs['state']}
 
         return preprocess_act_output(outputs['ac']), info
+    

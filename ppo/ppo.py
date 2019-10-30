@@ -19,7 +19,7 @@ def constfn(val):
         return val
     return f
 
-def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=0.0, lr=3e-4,
+def learn(env, total_timesteps, nagents=2, eval_env=None, seed=None, nsteps=2048, ent_coef=0.0, lr=3e-4,
             vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95,
             log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
             save_interval=0, load_path=None, save_dir=None, model_fn=None, update_fn=None, init_fn=None,
@@ -69,7 +69,7 @@ def learn(env, total_timesteps, eval_env=None, seed=None, nsteps=2048, ent_coef=
     ac_space = env.action_space
 
     # Calculate the batch_size
-    nbatch = nenvs * nsteps
+    nbatch = nenvs * nsteps * nagents
     nbatch_train = nbatch // nminibatches
     is_mpi_root = (MPI is None or MPI.COMM_WORLD.Get_rank() == 0)
 
