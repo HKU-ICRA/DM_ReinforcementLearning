@@ -9,6 +9,7 @@ The following algorithms are well-known in the reinforcement-learning community 
 | PPO | ☑ | ☑ | ☑ | ☑ | ☐ | ☐ |
 | DDPG | ☑ | ☑<sup>1</sup> | ☑ | ☐ | ☐ | ☐ |
 | TD3 | ☑ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| SAC | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 
 <sup>1</sup> Gaussian noise diverges but Ornstein Uhlenbeck converges.
 
